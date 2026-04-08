@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'academics',
     'scheduling',
     'records',
+    'rest_framework',
 ]
 
 MIDDLEWARE = [
