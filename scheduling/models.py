@@ -20,6 +20,7 @@ class CourseClass(TimestampedModel):
         related_name="coordinated_classes",
     )
 
+    #ie: Signals and Systems — Spring 2026 not Signals and Systems entirely because student might take it in different terms if they fail or want to improve their grade.
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=["course", "term"], name="unique_course_per_term")
