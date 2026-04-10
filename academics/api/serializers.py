@@ -13,7 +13,7 @@ class DisciplineSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = Discipline
-        fields = ["id", "name", "code", "department", "department_name", "created_at", "updated_at"]
+        fields = ["id", "name", "code", "department", "department_name", "program_type", "created_at", "updated_at"]
 
 
 class TermSerializer(serializers.ModelSerializer):

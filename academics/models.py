@@ -11,13 +11,14 @@ class Department(TimestampedModel):
 
 
 class Discipline(TimestampedModel):
-    name       = models.CharField(max_length=255)
-    code       = models.CharField(max_length=20, unique=True)
-    department = models.ForeignKey(
-        Department,
-        on_delete=models.PROTECT,
-        related_name="disciplines",
-    )
+    class ProgramType(models.TextChoices):
+        GSP = "GSP", "General Scientific Program"
+        SSP = "SSP", "Specialised Scientific Program"
+
+    name         = models.CharField(max_length=255)
+    code         = models.CharField(max_length=20, unique=True)
+    department   = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="disciplines")
+    program_type = models.CharField(max_length=3, choices=ProgramType.choices)
 
     def __str__(self):
         return f"{self.code} — {self.name}"
