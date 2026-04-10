@@ -47,15 +47,10 @@ class Course(TimestampedModel):
         CORE     = "CORE",     "Core"
         ELECTIVE = "ELECTIVE", "Elective"
 
-    class CourseRank(models.TextChoices):
-        BASIC      = "BASIC",      "Basic"
-        SPECIALIZED = "SPECIALIZED", "Specialized"
-
     code        = models.CharField(max_length=20, unique=True)
     title       = models.CharField(max_length=255)
     credits     = models.PositiveSmallIntegerField()
     course_type = models.CharField(max_length=10, choices=CourseType.choices, default=CourseType.CORE)
-    course_rank = models.CharField(max_length=12, choices=CourseRank.choices, default=CourseRank.BASIC)
     department  = models.ForeignKey(
         Department,
         on_delete=models.PROTECT,
