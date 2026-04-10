@@ -144,7 +144,7 @@ class Command(BaseCommand):
                 "name": "Spring 2026",
                 "start_date": datetime.date(2026, 2, 14),
                 "end_date": datetime.date(2026, 6, 15),
-                "is_active": True  # <--- Setting the current timeline as active!
+                "is_active": True 
             },
             {
                 "name": "Fall 2026",
