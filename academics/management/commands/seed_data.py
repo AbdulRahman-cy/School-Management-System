@@ -1,5 +1,8 @@
 from django.core.management.base import BaseCommand
 from academics.models import Department, Discipline
+import datetime 
+from django.core.management.base import BaseCommand
+from academics.models import Department, Discipline, Term 
 
 class Command(BaseCommand):
     help = 'Seeds departments and disciplines for Alexandria University'
@@ -29,7 +32,7 @@ class Command(BaseCommand):
         self.stdout.write("Creating 16 Scientific Departments...")
         for d in scientific_departments:
             Department.objects.get_or_create(code=d["code"], defaults={"name": d["name"]})
-        self.stdout.write(self.style.SUCCESS("✅ 16 Scientific Departments loaded."))
+        self.stdout.write(self.style.SUCCESS(" 16 Scientific Departments loaded."))
 
         # ─── 12 SSP — inserted into BOTH Department and Discipline ─
         ssp_programs = [
@@ -50,7 +53,7 @@ class Command(BaseCommand):
         self.stdout.write("Creating 12 SSP Departments...")
         for p in ssp_programs:
             Department.objects.get_or_create(code=p["code"], defaults={"name": p["name"]})
-        self.stdout.write(self.style.SUCCESS("✅ 12 SSP Departments loaded. Total: 28 Departments."))
+        self.stdout.write(self.style.SUCCESS(" 12 SSP Departments loaded. Total: 28 Departments."))
 
         self.stdout.write("Creating 12 SSP Disciplines...")
         for p in ssp_programs:
@@ -63,7 +66,7 @@ class Command(BaseCommand):
                     "department":   dept,
                 }
             )
-        self.stdout.write(self.style.SUCCESS("✅ 12 SSP Disciplines loaded."))
+        self.stdout.write(self.style.SUCCESS(" 12 SSP Disciplines loaded."))
 
         # ─── 11 GSP Programs ──────────────────────────────────────
         gsp_programs = [
@@ -91,8 +94,79 @@ class Command(BaseCommand):
                     "department":   dept,
                 }
             )
-        self.stdout.write(self.style.SUCCESS("✅ 11 GSP Disciplines loaded."))
+        self.stdout.write(self.style.SUCCESS(" 11 GSP Disciplines loaded."))
 
         self.stdout.write(self.style.SUCCESS(
-            "\n🚀 Seeding complete. 28 Departments | 11 GSP Disciplines | 12 SSP Disciplines"
+            "\n Seeding complete. 28 Departments | 11 GSP Disciplines | 12 SSP Disciplines"
         ))
+
+        # =========================================================
+        # 0. ACADEMIC TERMS (8 Terms: Spring 2023 to Fall 2026)
+        # =========================================================
+        terms_data = [
+            {
+                "name": "Spring 2023",
+                "start_date": datetime.date(2023, 2, 11),
+                "end_date": datetime.date(2023, 6, 15),
+                "is_active": False
+            },
+            {
+                "name": "Fall 2023",
+                "start_date": datetime.date(2023, 9, 30),
+                "end_date": datetime.date(2024, 1, 25),
+                "is_active": False
+            },
+            {
+                "name": "Spring 2024",
+                "start_date": datetime.date(2024, 2, 10),
+                "end_date": datetime.date(2024, 6, 15),
+                "is_active": False
+            },
+            {
+                "name": "Fall 2024",
+                "start_date": datetime.date(2024, 9, 28),
+                "end_date": datetime.date(2025, 1, 23),
+                "is_active": False
+            },
+            {
+                "name": "Spring 2025",
+                "start_date": datetime.date(2025, 2, 8),
+                "end_date": datetime.date(2025, 6, 15),
+                "is_active": False
+            },
+            {
+                "name": "Fall 2025",
+                "start_date": datetime.date(2025, 9, 27),
+                "end_date": datetime.date(2026, 1, 22),
+                "is_active": False
+            },
+            {
+                "name": "Spring 2026",
+                "start_date": datetime.date(2026, 2, 14),
+                "end_date": datetime.date(2026, 6, 15),
+                "is_active": True  # <--- Setting the current timeline as active!
+            },
+            {
+                "name": "Fall 2026",
+                "start_date": datetime.date(2026, 9, 26),
+                "end_date": datetime.date(2027, 1, 21),
+                "is_active": False
+            }
+        ]
+
+        self.stdout.write("Creating Academic Terms...")
+        for term in terms_data:
+            obj, created = Term.objects.get_or_create(
+                name=term["name"],
+                defaults={
+                    "start_date": term["start_date"],
+                    "end_date": term["end_date"],
+                    "is_active": term["is_active"]
+                }
+            )
+            # Safely trigger your custom save() method if activating a term
+            if term["is_active"] and not obj.is_active:
+                obj.is_active = True
+                obj.save()
+                
+        self.stdout.write(self.style.SUCCESS(f" {len(terms_data)} Academic Terms loaded!"))
