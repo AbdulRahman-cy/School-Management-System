@@ -61,12 +61,13 @@ class ClassSession(TimestampedModel):
         related_name="taught_sessions",
     )
     day_of_week  = models.IntegerField(choices=DayOfWeek.choices)
-    time_slot    = models.TimeField()
+    start_time = models.TimeField(default="08:00")
+    end_time   = models.TimeField(default="09:30")
     location     = models.CharField(max_length=100)
     capacity     = models.PositiveIntegerField()
 
     def __str__(self):
         return (
             f"{self.course_class} | {self.get_session_type_display()} | "
-            f"{self.get_day_of_week_display()} {self.time_slot}"
+            f"{self.get_day_of_week_display()} {self.start_time} - {self.end_time}"
         )
