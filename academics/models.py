@@ -59,3 +59,20 @@ class Course(TimestampedModel):
 
     def __str__(self):
         return f"{self.code} — {self.title}"
+    
+class Room(TimestampedModel):
+    code       = models.CharField(max_length=20, unique=True)
+    name       = models.CharField(max_length=100)
+    capacity   = models.PositiveIntegerField()
+    room_type  = models.CharField(max_length=20, choices=[
+                     ("LECTURE", "Lecture Hall"),
+                     ("LAB",     "Laboratory"),
+                     ("SEMINAR", "Seminar Room"),
+                 ])
+    department = models.ForeignKey(
+                     "academics.Department",
+                     on_delete=models.SET_NULL,
+                     null=True, blank=True,
+                     related_name="rooms",
+                 )
+    is_active  = models.BooleanField(default=True)

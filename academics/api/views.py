@@ -1,7 +1,7 @@
 from rest_framework import viewsets
 from academics.api.permissions import IsAdminOrReadOnly
-from academics.models import Department, Discipline, Term, Course
-from .serializers import CourseSerializer, DepartmentSerializer, DisciplineSerializer, TermSerializer
+from academics.models import Department, Discipline, Term, Course, Room
+from .serializers import CourseSerializer, DepartmentSerializer, DisciplineSerializer, TermSerializer, RoomSerializer
 
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
@@ -21,5 +21,10 @@ class TermViewSet(viewsets.ModelViewSet):
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+class RoomViewSet(viewsets.ModelViewSet):   
+    queryset = Room.objects.all()
+    serializer_class = RoomSerializer
     permission_classes = [IsAdminOrReadOnly]
     

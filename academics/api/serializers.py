@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from academics.models import Department, Discipline, Term, Course
+from academics.models import Department, Discipline, Term, Course, Room
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -29,3 +29,10 @@ class CourseSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Course
         fields = ["id", "code", "title", "credits","course_type", "department", "department_name", "created_at", "updated_at"]
+
+class RoomSerializer(serializers.ModelSerializer):
+    department_name = serializers.StringRelatedField(source="department")   
+
+    class Meta:
+        model  = Room
+        fields = ["id", "name", "capacity", "room_type", "department", "department_name", "is_active", "created_at", "updated_at"]
