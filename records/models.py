@@ -11,26 +11,26 @@ class Enrollment(TimestampedModel):
         related_name="enrollments",
     )
     course_class = models.ForeignKey(
-        "scheduling.CourseClass",
+        "academics.CourseClass",
         on_delete=models.CASCADE,
         related_name="enrollments",
     )
     lecture_session = models.ForeignKey(
-        "scheduling.ClassSession",
+        "scheduling.Session",
         on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name="lecture_enrollments",
         limit_choices_to={"session_type": "LECTURE"},
     )
     tutorial_session = models.ForeignKey(
-        "scheduling.ClassSession",
+        "scheduling.Session",
         on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name="tutorial_enrollments",
         limit_choices_to={"session_type": "TUTORIAL"},
     )
     lab_session = models.ForeignKey(
-        "scheduling.ClassSession",
+        "scheduling.Session",
         on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name="lab_enrollments",

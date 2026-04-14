@@ -1,103 +1,119 @@
 from django.db import models
-from users.models import TimestampedModel
+from django.core.exceptions import ValidationError
+
+from academics.models import TimestampedModel
 
 
-from django.db import models
-from users.models import TimestampedModel
+# ─────────────────────────────────────────────────────────────
+# Timeslot
+# ─────────────────────────────────────────────────────────────
 
-class CourseClass(TimestampedModel):
-    
-    # 1. ADD THE CHOICES CLASS
-    class SectionGroup(models.IntegerChoices):
-        GROUP_1 = 1, "Group 1"
-        GROUP_2 = 2, "Group 2"
-        GROUP_3 = 3, "Group 3"
-        GROUP_4 = 4, "Group 4"
-        GROUP_5 = 5, "Group 5"
-        GROUP_6 = 6, "Group 6"
-        GROUP_7 = 7, "Group 7"
-        GROUP_8 = 8, "Group 8"
-        GROUP_9 = 9, "Group 9"
-        GROUP_10 = 10, "Group 10"
+class Timeslot(TimestampedModel):
 
-    course = models.ForeignKey(
-        "academics.Course",
-        on_delete=models.PROTECT,
-        related_name="classes",
-    )
-    term = models.ForeignKey(
-        "academics.Term",
-        on_delete=models.PROTECT,
-        related_name="classes",
-    )
-    
-    # 2. UPDATE THE SECTION FIELD
-    section = models.IntegerField(
-        choices=SectionGroup.choices,
-        default=SectionGroup.GROUP_1,
-        help_text="Select the group/section identifier for this class batch."
-    )
-    
-    coordinator = models.ForeignKey(
-        "users.TeacherProfile",
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name="coordinated_classes",
-    )
-    disciplines = models.ManyToManyField(
-        "academics.Discipline",
-        blank=True,
-        related_name="course_classes",
-    )
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["course", "term", "section"], 
-                name="unique_course_term_section"
-            )
-        ]
-
-    def __str__(self):
-        # 3. USE get_FOO_display() TO SHOW THE HUMAN-READABLE NAME ("Group 1" instead of "1")
-        return f"{self.course.code} / {self.term.name} / {self.get_section_display()}"
-
-    def __str__(self):
-        return f"{self.course.code} / {self.term.name}"
-
-
-class ClassSession(TimestampedModel):
-    class SessionType(models.TextChoices):
-        LECTURE  = "LECTURE",  "Lecture"
-        TUTORIAL = "TUTORIAL", "Tutorial"
-        LAB      = "LAB",      "Lab"
-
-    class DayOfWeek(models.IntegerChoices):
+    class Day(models.IntegerChoices):
         SATURDAY  = 0, "Saturday"
         SUNDAY    = 1, "Sunday"
         MONDAY    = 2, "Monday"
         TUESDAY   = 3, "Tuesday"
         WEDNESDAY = 4, "Wednesday"
         THURSDAY  = 5, "Thursday"
-        FRIDAY    = 6, "Friday"
+
+    class Period(models.IntegerChoices):
+        PERIOD_1 = 1, "08:00 – 09:30"
+        PERIOD_2 = 2, "09:45 – 11:15"
+        PERIOD_3 = 3, "11:30 – 13:00"
+        PERIOD_4 = 4, "13:30 – 15:00"
+        PERIOD_5 = 5, "15:15 – 16:45"
+
+    day    = models.IntegerField(choices=Day.choices)
+    period = models.IntegerField(choices=Period.choices)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["day", "period"],
+                name="unique_timeslot",
+            )
+        ]
+        ordering = ["day", "period"]
+
+    def __str__(self):
+        return f"{self.get_day_display()} / {self.get_period_display()}"
 
 
-    course_class = models.ForeignKey(CourseClass, on_delete=models.CASCADE, related_name="sessions")
-    session_type = models.CharField(max_length=10, choices=SessionType.choices)
-    instructor   = models.ForeignKey(
-        "users.TeacherProfile",
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name="taught_sessions",
+# ─────────────────────────────────────────────────────────────
+# Session
+# ─────────────────────────────────────────────────────────────
+
+class Session(TimestampedModel):
+
+    class SessionType(models.TextChoices):
+        LECTURE  = "LECTURE",  "Lecture"
+        LAB      = "LAB",      "Lab"
+        TUTORIAL = "TUTORIAL", "Tutorial"
+
+    course_class = models.ForeignKey(
+        "academics.CourseClass",
+        on_delete=models.CASCADE,
+        related_name="sessions",
     )
-    day_of_week  = models.IntegerField(choices=DayOfWeek.choices)
-    start_time = models.TimeField(default="08:00")
-    end_time   = models.TimeField(default="09:30")
-    location     = models.CharField(max_length=100)
-    capacity     = models.PositiveIntegerField()
+    room         = models.ForeignKey(
+        "academics.Room",
+        on_delete=models.PROTECT,
+        related_name="sessions",
+    )
+    timeslot     = models.ForeignKey(
+        Timeslot,
+        on_delete=models.PROTECT,
+        related_name="sessions",
+    )
+    session_type = models.CharField(
+        max_length=10,
+        choices=SessionType.choices,
+        default=SessionType.LECTURE,
+    )
+
+    class Meta:
+        constraints = [
+            # A room can only hold one session per timeslot
+            models.UniqueConstraint(
+                fields=["room", "timeslot"],
+                name="unique_room_timeslot",
+            ),
+            # unique_group_timeslot removed — enforced in clean() instead
+        ]
+
+    def clean(self):
+        errors = {}
+
+        # Room type must match session type
+        if self.room_id and self.session_type:
+            room_type = self.room.room_type
+            if self.session_type == self.SessionType.LAB and room_type != "LAB":
+                errors["room"] = "Lab sessions must be assigned to a lab room."
+            if self.session_type == self.SessionType.LECTURE and room_type == "LAB":
+                errors["room"] = "Lecture sessions cannot be assigned to a lab room."
+
+        # Room capacity must fit the group (we don't track group size yet,
+        # but the hook is here for when enrollment counts are available)
+
+        # Room must not be owned by a different discipline's department
+        if self.room_id and self.course_class_id:
+            room_dept = self.room.department
+            group_dept = self.course_class.group.discipline.department
+            if room_dept is not None and room_dept != group_dept:
+                errors["room"] = (
+                    f"Room {self.room.code} belongs to {room_dept.code} "
+                    f"but this group is from {group_dept.code}."
+                )
+
+        if errors:
+            raise ValidationError(errors)
 
     def __str__(self):
         return (
-            f"{self.course_class} | {self.get_session_type_display()} | "
-            f"{self.get_day_of_week_display()} {self.start_time} - {self.end_time}"
+            f"{self.course_class} / "
+            f"{self.session_type} / "
+            f"{self.timeslot} / "
+            f"{self.room.code}"
         )
