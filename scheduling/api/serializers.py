@@ -1,28 +1,24 @@
 from rest_framework import serializers
-from scheduling.models import CourseClass, ClassSession
+from scheduling.models import Timeslot, Session
 
 
-class CourseClassSerializer(serializers.ModelSerializer):
-    course_name      = serializers.StringRelatedField(source="course")
-    term_name        = serializers.StringRelatedField(source="term")
-    coordinator_name = serializers.StringRelatedField(source="coordinator")
+class TimeslotSerializer(serializers.ModelSerializer):
 
     class Meta:
-        model  = CourseClass
+        model = Timeslot
         fields = [
-            "id", "course", "course_name", "term", "term_name",
-            "coordinator", "coordinator_name", "programs",
+            "id", "day", "period", "created_at", "updated_at",
+        ]
+
+
+class SessionSerializer(serializers.ModelSerializer):
+    timeslot = TimeslotSerializer()
+    room = serializers.StringRelatedField(source="room")
+
+    class Meta:
+        model  = Session
+        fields = [
+            "id", "course_class", "session_type", "timeslot", "room",
             "created_at", "updated_at",
         ]
 
-
-class ClassSessionSerializer(serializers.ModelSerializer):
-    instructor_name = serializers.StringRelatedField(source="instructor")
-
-    class Meta:
-        model  = ClassSession
-        fields = [
-            "id", "course_class", "session_type", "instructor",
-            "instructor_name", "day_of_week", "start_time", "end_time",
-            "location", "capacity", "created_at", "updated_at",
-        ]

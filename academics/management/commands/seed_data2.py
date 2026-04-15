@@ -25,6 +25,8 @@ class Command(BaseCommand):
             {"code": "MIE", "name": "Production Engineering"},
             {"code": "NRE", "name": "Nuclear and Radiation Engineering"},
             {"code": "CSE", "name": "Computer and Systems Engineering"},
+            {"code": "HUM", "name": "Humanities and Social Sciences"},
+            {"code": "TRN", "name": "Industrial Training"},
         ]
 
         self.stdout.write("Creating 16 Scientific Departments...")
@@ -448,6 +450,31 @@ class Command(BaseCommand):
             {"code": "EEP 425", "title": "Electric Power Systems and Distribution", "credits": 3},
             {"code": "MEC x34", "title": "Fluid Mechanics and Hydraulic Machinery", "credits": 3},
             {"code": "MEC x42", "title": "Stress Analysis", "credits": 3},
+
+            # ─── Missing Courses from Blueprint ─────────────────────────
+            {"code": "EMP 112", "title": "Mathematics-2", "credits": 3},
+            {"code": "EMP 122", "title": "Dynamics", "credits": 3},
+            {"code": "EMP 132", "title": "Physics-2", "credits": 3},
+            {"code": "EMP 141", "title": "Engineering Drawing", "credits": 3},
+            {"code": "EMP x18", "title": "Probability & Statistics", "credits": 3},
+            {"code": "CHE 111", "title": "Engineering Chemistry", "credits": 3},
+            {"code": "MIE 161", "title": "Principles of Manufacturing Engineering", "credits": 2},
+            {"code": "CSE 111", "title": "Computers & Programming", "credits": 2},
+            {"code": "TRN 121", "title": "Technical Writing", "credits": 2},
+            {"code": "ARC 111", "title": "Architectural Design Principles", "credits": 2},
+            {"code": "ARC 212", "title": "Architecture Design 2: Functionalism", "credits": 4},
+            {"code": "ARC 222", "title": "Architecture From Renaissance to the present", "credits": 3},
+            {"code": "ARC 233", "title": "Advanced Building Construction", "credits": 3},
+            {"code": "ARC 234", "title": "Technical Installations 1", "credits": 2},
+            {"code": "STR 241", "title": "Soil Mechanics and Foundations for Architects", "credits": 2},
+            {"code": "HUM 163", "title": "Visual Studies", "credits": 2},
+            {"code": "HUM 142", "title": "The Advent of Architecture", "credits": 3},
+            
+            # ─── Electives ──────────────────────────────────────────────
+            {"code": "ARC 2E2", "title": "Basic Elective 2", "credits": 2, "course_type": "ELECTIVE"},
+            {"code": "HUM 1E1", "title": "Foreign Language (Elective)", "credits": 1, "course_type": "ELECTIVE"},
+            {"code": "HUM 1E2", "title": "General Culture (Elective)", "credits": 2, "course_type": "ELECTIVE"},
+            {"code": "HUM xE5", "title": "Critical Thinking, Innovation, and Entrepreneurship", "credits": 3, "course_type": "ELECTIVE"},
 
             # ─── Screenshot 18 ────────────────────────────────────────
             {"code": "NRE 412", "title": "Nuclear Power Plants", "credits": 3},

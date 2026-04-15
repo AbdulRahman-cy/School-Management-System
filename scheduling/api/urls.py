@@ -1,10 +1,10 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from scheduling.api.views import CourseClassViewSet, ClassSessionViewSet
+from scheduling.api.views import SessionViewSet, TimeslotViewSet
 
 router = DefaultRouter()
-router.register(r"course-classes", CourseClassViewSet, basename="courseclass")
-router.register(r"class-sessions", ClassSessionViewSet, basename="classsession")    
+router.register(r"sessions", SessionViewSet, basename="session")
+router.register(r"timeslots", TimeslotViewSet, basename="timeslot")
 
 urlpatterns = [
     path("", include(router.urls)),     

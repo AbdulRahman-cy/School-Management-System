@@ -1,16 +1,16 @@
 from rest_framework import viewsets
-from scheduling.models import CourseClass, ClassSession
-from .serializers import CourseClassSerializer , ClassSessionSerializer
+from scheduling.models import Session, Timeslot
+from .serializers import SessionSerializer , TimeslotSerializer
 from .permissions import IsAdminOrReadOnly
 
-class CourseClassViewSet(viewsets.ModelViewSet):
-    queryset = CourseClass.objects.all()
-    serializer_class = CourseClassSerializer    
+class SessionViewSet(viewsets.ModelViewSet):
+    queryset = Session.objects.all()
+    serializer_class = SessionSerializer
     permission_classes = [IsAdminOrReadOnly]
 
-class ClassSessionViewSet(viewsets.ModelViewSet):
-    queryset = ClassSession.objects.all()
-    serializer_class = ClassSessionSerializer
+class TimeslotViewSet(viewsets.ModelViewSet):
+    queryset = Timeslot.objects.all()
+    serializer_class = TimeslotSerializer
     permission_classes = [IsAdminOrReadOnly]
 
 

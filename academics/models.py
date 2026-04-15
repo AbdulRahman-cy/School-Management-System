@@ -91,6 +91,9 @@ class Course(TimestampedModel):
         on_delete=models.PROTECT,
         related_name="courses",
     )
+    lec_sessions = models.PositiveSmallIntegerField(default=1)
+    tut_sessions = models.PositiveSmallIntegerField(default=1)
+    lab_sessions = models.PositiveSmallIntegerField(default=1)
 
     def __str__(self):
         return f"{self.code} — {self.title}"
