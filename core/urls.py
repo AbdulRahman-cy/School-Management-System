@@ -23,6 +23,7 @@ urlpatterns = [
     path('api/academics/', include('academics.api.urls')),
     path('api/users/', include('users.api.urls')),
     path('api/scheduling/', include('scheduling.api.urls')),
+    path('api/records/', include('records.api.urls')),
     path('api/token-login/', views.obtain_auth_token, name='api_token_auth'),
 ]
 
