@@ -62,6 +62,27 @@ class Enrollment(TimestampedModel):
         self.full_clean()
         super().save(*args, **kwargs)
 
+    @property
+    def final_percentage(self):
+        # Math belongs here! Summing up the exams for this specific course enrollment.
+        grades = self.grades.all()
+        if not grades: return 0.00
+        return sum(grade.weighted_score for grade in grades)
+
+    @property
+    def course_grade_points(self):
+        # Math belongs here! Converting Alexandria Uni percentage to GPA.
+        score = self.final_percentage
+        if score >= 93: return 4.0  # A
+        if score >= 89: return 3.7  # A-
+        if score >= 84: return 3.3  # B+
+        if score >= 79: return 3.0  # B
+        if score >= 74: return 2.7  # C+
+        if score >= 69: return 2.4  # C
+        if score >= 64: return 2.0  # D+
+        if score >= 60: return 1.0  # D
+        return 0.0                  # F
+
     def __str__(self):
         return f"{self.student} → {self.course_class}"
 
@@ -89,6 +110,6 @@ class GradeEntry(TimestampedModel):
     @property
     def weighted_score(self) -> Decimal:
         return self.score * self.weight
-
+    
     def __str__(self):
         return f"{self.enrollment} | {self.component}: {self.score} (×{self.weight})"

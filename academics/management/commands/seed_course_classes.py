@@ -6,45 +6,8 @@ from academics.models import Term, StudyGroup, Course, CourseClass
 
 # ─── THE CURRICULUM BLUEPRINT ──────────────────────────────────────
 # Map exactly which courses a Discipline takes per Year and Term.
-# Electives are included as their block codes (e.g., HUM 1E1) for now.
 CURRICULUM_BLUEPRINT = {
-    "CCE": {
-        1: {
-            "Fall":   ["EMP 111", "EMP 121", "EMP 131", "HUM 1E3", "CHE 111", "MIE 161", "HUM 1E2"],
-            "Spring": ["EMP 112", "EMP 122", "EMP 132", "CSE 111", "EMP 141", "HUM 1E1", "TRN 121"]
-        },
-        2: {
-            "Fall":   ["EMP x12", "CSE 221", "EEP 218", "CSE 216", "CSE 237", "EMP x14", "HUM xE4"],
-            "Spring": ["EMP x18", "CSE 226", "EEC 239", "CSE 238", "EEC 271", "CSE 246", "EEC 216"]
-        },
-        3: {
-            "Fall":   ["CSE 327", "EEC 371", "EEC 343", "EEC 381", "CSE 321", "CSE 331"],
-            "Spring": ["CSE 328", "CSE 361", "CSE 376", "CCE 3E1", "EEC 382", "CSE 336"]
-        },
-        4: {
-            "Fall":   ["CSE 466", "CSE 426", "EEC 441", "CCE 4E1", "CCE 4E2", "CCE 401"],
-            "Spring": ["CSE 461", "CCE 4E3", "CCE 4E4", "CCE 4E5", "HUM xE5", "CCE 402"]
-        }
-    },
-    "ARC_GSP": {
-        1: {
-            "Fall":   ["EMP 111", "EMP 121", "EMP 131", "CHE 111", "EMP 141", "CSE 111", "HUM 1E1"],
-            "Spring": ["EMP 112", "EMP 122", "EMP 132", "ARC 111", "HUM 163", "HUM 142", "TRN 121"]
-        },
-        2: {
-            "Fall":   ["ARC 211", "ARC 221", "ARC 231", "ARC 232", "ARC 2E1", "STR 213", "STR 223"],
-            "Spring": ["ARC 212", "ARC 222", "ARC 233", "ARC 234", "ARC 2E2", "TRE 213", "STR 241"]
-        }
-        # Add Level 3 and 4 here later
-    },
-    "CVE_GSP": {
-        1: {
-            "Fall":   ["EMP 111", "EMP 121", "EMP 131", "HUM 1E3", "EMP 141", "CSE 111", "HUM 1E1"],
-            "Spring": ["EMP 112", "EMP 122", "EMP 132", "MIE 161", "CHE 111", "HUM 1E2", "TRN 121"]
-        },
-        # Add Level 2, 3, 4 here later
-
-        "MIE_GSP": {
+    "MIE": {
         1: {
             "Fall":   ["EMP 111", "EMP 121", "EMP 131", "HUM 1E3", "EMP 141", "CSE 111", "HUM 1E1"],
             "Spring": ["EMP 112", "EMP 122", "EMP 132", "MIE 161", "CHE 111", "HUM 1E2", "TRN 121"]
@@ -62,7 +25,7 @@ CURRICULUM_BLUEPRINT = {
             "Spring": ["MIE 451", "MIE 4E2", "MIE 4E3", "MIE 4E4", "MIE 402", "HUM xE5"]
         }
     },
-    "NRE_GSP": {
+    "NRE": {
         1: {
             "Fall":   ["EMP 111", "EMP 121", "EMP 131", "HUM 1E3", "EMP 141", "CSE 111", "HUM 1E1"],
             "Spring": ["EMP 112", "EMP 122", "EMP 132", "MIE 161", "CHE 111", "HUM 1E2", "TRN 121"]
@@ -80,7 +43,7 @@ CURRICULUM_BLUEPRINT = {
             "Spring": ["NRE 431", "EEP 425", "NRE 4E3", "NRE 4E4", "NRE 4E5", "NRE 402"]
         }
     },
-    "CSE_GSP": {
+    "CSE": {
         1: {
             "Fall":   ["EMP 111", "EMP 121", "EMP 131", "HUM 1E3", "EMP 141", "CSE 111", "HUM 1E1"],
             "Spring": ["EMP 112", "EMP 122", "EMP 132", "MIE 161", "CHE 111", "HUM 1E2", "TRN 121"]
@@ -98,10 +61,22 @@ CURRICULUM_BLUEPRINT = {
             "Spring": ["CSE 461", "CSE 462", "CSE 441", "CSE 4E4", "CSE 4E5", "CSE 402"]
         }
     },
-
-    # ════════════════════════════════════════════════════════════════════
-    # SSP PROGRAMS (Specific Specialization)
-    # ════════════════════════════════════════════════════════════════════
+    "ARC": {
+        1: {
+            "Fall":   ["EMP 111", "EMP 121", "EMP 131", "CHE 111", "EMP 141", "CSE 111", "HUM 1E1"],
+            "Spring": ["EMP 112", "EMP 122", "EMP 132", "ARC 111", "HUM 163", "HUM 142", "TRN 121"]
+        },
+        2: {
+            "Fall":   ["ARC 211", "ARC 221", "ARC 231", "ARC 232", "ARC 2E1", "STR 213", "STR 223"],
+            "Spring": ["ARC 212", "ARC 222", "ARC 233", "ARC 234", "ARC 2E2", "TRE 213", "STR 241"]
+        }
+    },
+    "CVE": {
+        1: {
+            "Fall":   ["EMP 111", "EMP 121", "EMP 131", "HUM 1E3", "EMP 141", "CSE 111", "HUM 1E1"],
+            "Spring": ["EMP 112", "EMP 122", "EMP 132", "MIE 161", "CHE 111", "HUM 1E2", "TRN 121"]
+        }
+    },
     "MSE": {
         1: {
             "Fall":   ["EMP 111", "EMP 121", "EMP 131", "HUM 1E3", "MIE 161", "CHE 111", "HUM 1E2"],
@@ -157,7 +132,6 @@ CURRICULUM_BLUEPRINT = {
         }
     },
     "CCE": {
-        # Verified exact match with your original CCE data request
         1: {
             "Fall":   ["EMP 111", "EMP 121", "EMP 131", "HUM 1E3", "CHE 111", "MIE 161", "HUM 1E2"],
             "Spring": ["EMP 112", "EMP 122", "EMP 132", "CSE 111", "EMP 141", "HUM 1E1", "TRN 121"]
@@ -193,9 +167,6 @@ CURRICULUM_BLUEPRINT = {
             "Spring": ["BME 442", "BME 478", "BME 4E4", "BME 4E5", "BME 4E6", "BME 402"]
         }
     }
-    }
-
-
 }
 
 
