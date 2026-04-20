@@ -113,3 +113,55 @@ class GradeEntry(TimestampedModel):
     
     def __str__(self):
         return f"{self.enrollment} | {self.component}: {self.score} (×{self.weight})"
+    
+
+class AttendanceRecord(TimestampedModel):
+    class Status(models.TextChoices):
+        PRESENT = "PRESENT", "Present"
+        ABSENT  = "ABSENT",  "Absent"
+        LATE    = "LATE",    "Late"
+        EXCUSED = "EXCUSED", "Excused"
+
+    student = models.ForeignKey(
+        "users.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="attendance_records",
+    )
+    session = models.ForeignKey(
+        "scheduling.Session",
+        on_delete=models.CASCADE,
+        related_name="attendance_records",
+    )
+    week    = models.PositiveSmallIntegerField(
+        help_text="Week number within the term (1-based)",
+    )
+    status  = models.CharField(max_length=10, choices=Status.choices)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "session", "week"],
+                name="unique_attendance_per_session_week",
+            )
+        ]
+    def clean(self):
+        from records.models import Enrollment
+
+
+        is_enrolled = Enrollment.objects.filter(
+            student=self.student,
+            course_class=self.session.course_class,
+        ).exists()
+
+        if not is_enrolled:
+            raise ValidationError(
+                f"Student {self.student} is not enrolled in "
+                f"{self.session.course_class}."
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.student} | {self.session} | W{self.week} [{self.status}]"

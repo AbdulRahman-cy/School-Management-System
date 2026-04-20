@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.core.exceptions import ValidationError as DjangoValidationError
 from academics.api.serializers import CourseClassSerializer
-from records.models import Enrollment, GradeEntry
+from records.models import Enrollment, GradeEntry, AttendanceRecord
 import statistics
 
 class GradeEntrySerializer(serializers.ModelSerializer):
@@ -83,3 +83,29 @@ class EnrollmentSerializer(serializers.ModelSerializer):
                 "F": len([p for p in percentages if p < 60]),
             }
         }
+    
+
+class AttendanceRecordSerializer(serializers.ModelSerializer):
+
+    course_code  = serializers.CharField(
+        source="session.course_class.course.code",
+        read_only=True,
+    )
+    course_title = serializers.CharField(
+        source="session.course_class.course.title",
+        read_only=True,
+    )
+    session_type = serializers.CharField(
+        source="session.session_type",
+        read_only=True,
+    )
+
+    class Meta:
+        model  = AttendanceRecord
+        fields = [
+            "id", "student", "session",
+            "course_code", "course_title", "session_type",
+            "week", "status",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]

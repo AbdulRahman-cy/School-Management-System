@@ -206,3 +206,7 @@ class CourseClass(TimestampedModel):
 
     def __str__(self):
         return f"{self.course.code} / {self.group}"
+    
+
+
+            

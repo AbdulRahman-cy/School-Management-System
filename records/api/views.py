@@ -2,8 +2,8 @@ from rest_framework import viewsets
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from .permissions import IsAdminOrReadOnly
-from records.models import Enrollment, GradeEntry
-from .serializers import EnrollmentSerializer, GradeEntrySerializer
+from records.models import Enrollment, GradeEntry, AttendanceRecord
+from .serializers import EnrollmentSerializer, GradeEntrySerializer, AttendanceRecordSerializer
 
 class EnrollmentViewSet(viewsets.ModelViewSet):
     """
@@ -42,3 +42,17 @@ class GradeEntryViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return GradeEntry.objects.all().select_related('enrollment')
+    
+class AttendanceViewSet(viewsets.ModelViewSet):
+    serializer_class = AttendanceRecordSerializer
+
+    def get_queryset(self):
+        qs = AttendanceRecord.objects.select_related(
+            "session__course_class__course",  # for code, title
+            "session__timeslot",              # for day/period display
+            "student__user",                  # if you ever need the name
+        )
+        student_id = self.request.query_params.get("student")
+        if student_id:
+            qs = qs.filter(student_id=student_id)
+        return qs
