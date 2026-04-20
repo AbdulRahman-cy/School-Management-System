@@ -306,20 +306,30 @@ const NAV_ITEMS = [
 
 type DistBucket = keyof CohortStats["distribution"];
 
-const DIST_KEYS: DistBucket[] = ["A", "B", "C", "D", "F"];
+const DIST_KEYS: DistBucket[] = ["A", "A-", "B+", "B", "C+", "C", "D+", "D", "F"];
 
+// Colour ramp: A grades → purple, B grades → blue, C grades → green,
+// D grades → amber, F → red. Sub-letters share their parent's ramp.
 const DIST_COLORS: Record<DistBucket, { active: string; faded: string; text: string }> = {
-  A: { active: "#7c3aed", faded: "#ede9fe", text: "#6d28d9" },
-  B: { active: "#0ea5e9", faded: "#e0f2fe", text: "#0369a1" },
-  C: { active: "#10b981", faded: "#d1fae5", text: "#065f46" },
-  D: { active: "#f59e0b", faded: "#fef3c7", text: "#92400e" },
-  F: { active: "#ef4444", faded: "#fee2e2", text: "#991b1b" },
+  "A":  { active: "#7c3aed", faded: "#ede9fe", text: "#6d28d9" },
+  "A-": { active: "#6d28d9", faded: "#ede9fe", text: "#5b21b6" },
+  "B+": { active: "#0ea5e9", faded: "#e0f2fe", text: "#0369a1" },
+  "B":  { active: "#0284c7", faded: "#e0f2fe", text: "#075985" },
+  "C+": { active: "#10b981", faded: "#d1fae5", text: "#065f46" },
+  "C":  { active: "#059669", faded: "#d1fae5", text: "#064e3b" },
+  "D+": { active: "#f59e0b", faded: "#fef3c7", text: "#92400e" },
+  "D":  { active: "#d97706", faded: "#fef3c7", text: "#78350f" },
+  "F":  { active: "#ef4444", faded: "#fee2e2", text: "#991b1b" },
 };
 
 function bucketForGp(gp: number): DistBucket {
-  if (gp >= 3.3) return "A";
-  if (gp >= 2.4) return "B";
-  if (gp >= 2.0) return "C";
+  if (gp >= 4.0) return "A";
+  if (gp >= 3.7) return "A-";
+  if (gp >= 3.3) return "B+";
+  if (gp >= 3.0) return "B";
+  if (gp >= 2.7) return "C+";
+  if (gp >= 2.4) return "C";
+  if (gp >= 2.0) return "D+";
   if (gp >= 1.0) return "D";
   return "F";
 }

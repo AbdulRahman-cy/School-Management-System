@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from academics.api.serializers import CourseClassSerializer, RoomSerializer
 from scheduling.models import Timeslot, Session
 
 
@@ -12,13 +13,12 @@ class TimeslotSerializer(serializers.ModelSerializer):
 
 
 class SessionSerializer(serializers.ModelSerializer):
-    timeslot = TimeslotSerializer()
-    room = serializers.StringRelatedField(source="room")
+    # THESE MUST BE EXPLICITLY DECLARED
+    course_class = CourseClassSerializer(read_only=True)
+    room = RoomSerializer(read_only=True)
+    timeslot = TimeslotSerializer(read_only=True)
 
     class Meta:
-        model  = Session
-        fields = [
-            "id", "course_class", "session_type", "timeslot", "room",
-            "created_at", "updated_at",
-        ]
+        model = Session
+        fields = ['id', 'course_class', 'session_type', 'timeslot', 'room']
 

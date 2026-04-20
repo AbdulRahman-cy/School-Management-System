@@ -177,11 +177,15 @@ export interface CohortStats {
   lowest:          number;
   total_students:  number;
   distribution: {
-    A: number;
-    B: number;
-    C: number;
-    D: number;
-    F: number;
+    "A":  number;
+    "A-": number;
+    "B+": number;
+    "B":  number;
+    "C+": number;
+    "C":  number;
+    "D+": number;
+    "D":  number;
+    "F":  number;
   };
 }
 

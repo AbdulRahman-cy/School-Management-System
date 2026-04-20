@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from academics.api.serializers import DisciplineSerializer
 from users.models import BaseUser, TeacherProfile, StudentProfile
 
 
@@ -18,9 +19,11 @@ class TeacherProfileSerializer(serializers.ModelSerializer):
 
 
 class StudentProfileSerializer(serializers.ModelSerializer):
-    user_name       = serializers.StringRelatedField(source="user")
-    discipline_name = serializers.StringRelatedField(source="discipline")
+    user = BaseUserSerializer(read_only=True)
+    discipline = DisciplineSerializer(read_only=True)
+
+    cumulative_gpa = serializers.ReadOnlyField(source='calculated_gpa')
 
     class Meta:
-        model  = StudentProfile
-        fields = ["id", "user", "user_name", "discipline", "discipline_name", "enrollment_year", "cumulative_gpa", "created_at", "updated_at"]
+        model = StudentProfile
+        fields = ['id', 'user', 'discipline', 'enrollment_year', 'cumulative_gpa']

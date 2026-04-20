@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 
@@ -85,5 +87,30 @@ class StudentProfile(TimestampedModel):
     enrollment_year = models.PositiveIntegerField()
     cumulative_gpa  = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
 
+    @property
+    def calculated_gpa(self) -> Decimal:
+        """
+        Calculates the true cumulative GPA weighted by course credits.
+        """
+        # Fetch all enrollments for this student, joining the course to get credits
+        enrollments = self.enrollments.select_related('course_class__course').prefetch_related('grades')
+        
+        total_quality_points = Decimal('0.00')
+        total_credits = 0
+
+        for enr in enrollments:
+            # Prevent "in-progress" courses with 0 grades from tanking the GPA to a 0.0
+            if enr.grades.exists():
+                credits = enr.course_class.course.credits
+                
+                # Multiply the 0.0-4.0 scale by the course credits
+                total_quality_points += Decimal(str(enr.course_grade_points)) * credits
+                total_credits += credits
+
+        if total_credits == 0:
+            return Decimal('0.00')
+            
+        return round(total_quality_points / total_credits, 2)
+    
     def __str__(self):
         return f"{self.user.full_name} — {self.discipline}"

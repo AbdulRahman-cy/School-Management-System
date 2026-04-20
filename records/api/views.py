@@ -16,7 +16,6 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     filterset_fields = ['student', 'course_class']
     ordering_fields = ['created_at']
 
-    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         # Optimization: prefetch 'grades' because the serializer nests them.
@@ -40,7 +39,6 @@ class GradeEntryViewSet(viewsets.ModelViewSet):
     filterset_fields = ['enrollment']
     ordering_fields = ['created_at', 'score']
 
-    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         return GradeEntry.objects.all().select_related('enrollment')

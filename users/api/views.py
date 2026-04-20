@@ -6,15 +6,12 @@ from .permissions import IsAdmin
 class BaseUserViewSet(viewsets.ModelViewSet):
     queryset = BaseUser.objects.all()
     serializer_class = BaseUserSerializer
-    permission_classes = [IsAdmin]  
 
 
 class TeacherProfileViewSet(viewsets.ModelViewSet):
     queryset = TeacherProfile.objects.all()
     serializer_class = TeacherProfileSerializer
-    permission_classes = [IsAdmin]
 
 class StudentProfileViewSet(viewsets.ModelViewSet):
     queryset = StudentProfile.objects.all()
     serializer_class = StudentProfileSerializer
-    permission_classes = [IsAdmin]

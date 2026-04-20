@@ -9,11 +9,11 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
 
 class DisciplineSerializer(serializers.ModelSerializer):
-    department_name = serializers.StringRelatedField(source="department")
+    department = DepartmentSerializer(read_only=True)
 
     class Meta:
         model  = Discipline
-        fields = ["id", "name", "code", "department", "department_name", "program_type", "created_at", "updated_at"]
+        fields = ["id", "name", "code", "department", "program_type", "created_at", "updated_at"]
 
 
 class TermSerializer(serializers.ModelSerializer):
@@ -24,42 +24,42 @@ class TermSerializer(serializers.ModelSerializer):
 
 
 class CourseSerializer(serializers.ModelSerializer):
-    department_name = serializers.StringRelatedField(source="department")
-
+    department = DepartmentSerializer(read_only=True)
+    
     class Meta:
         model  = Course
-        fields = ["id", "code", "title", "credits", "course_type", "department", "department_name", "created_at", "updated_at"]
+        fields = ["id", "code", "title", "credits", "course_type", "department", "created_at", "updated_at"]
 
 
 class RoomSerializer(serializers.ModelSerializer):
-    department_name = serializers.StringRelatedField(source="department")
+    department = DepartmentSerializer(read_only=True)
 
     class Meta:
         model  = Room
-        fields = ["id", "code", "name", "capacity", "room_type", "department", "department_name", "is_active", "created_at", "updated_at"]
+        fields = ["id", "code", "name", "capacity", "room_type", "department", "is_active", "created_at", "updated_at"]
 
 
 class StudyGroupSerializer(serializers.ModelSerializer):
-    discipline_name = serializers.StringRelatedField(source="discipline")
-    term_name       = serializers.StringRelatedField(source="term")
+    discipline = DisciplineSerializer(read_only=True)
+    term       = TermSerializer(read_only=True)
 
     class Meta:
         model  = StudyGroup
-        fields = ["id", "discipline", "discipline_name", "term", "term_name", "year_level", "number", "created_at", "updated_at"]
+        fields = ["id", "discipline", "term", "year_level", "number", "created_at", "updated_at"]
 
 
 class CourseClassSerializer(serializers.ModelSerializer):
-    course_code  = serializers.StringRelatedField(source="course")
-    term_name    = serializers.StringRelatedField(source="term")
-    group_label  = serializers.StringRelatedField(source="group")
+    course  = CourseSerializer(read_only=True)
+    term = TermSerializer(read_only=True)
+    group = StudyGroupSerializer(read_only=True)
 
     class Meta:
         model  = CourseClass
         fields = [
             "id",
-            "course", "course_code",
-            "term",   "term_name",
-            "group",  "group_label",
+            "course", 
+            "term",   
+            "group",  
             "created_at", "updated_at",
         ]
 
