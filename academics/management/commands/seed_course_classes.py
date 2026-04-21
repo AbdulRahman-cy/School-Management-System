@@ -170,53 +170,53 @@ CURRICULUM_BLUEPRINT = {
 }
 
 
+from django.core.management.base import BaseCommand
+from academics.models import Term, StudyGroup, Course, CourseClass
+
+# [KEEP YOUR EXACT CURRICULUM_BLUEPRINT DICTIONARY HERE]
+
 class Command(BaseCommand):
-    help = "Seeds CourseClasses using the strict Curriculum Blueprint."
+    help = "Seeds CourseClasses across all terms using the strict Curriculum Blueprint."
 
     def handle(self, *args, **kwargs):
-        term = Term.objects.filter(is_active=True).first()
-        if not term:
-            self.stdout.write(self.style.ERROR("No active term found."))
-            return
-
-        # Determine if we are in Fall or Spring based on term name
-        season = "Fall" if "Fall" in term.name else "Spring"
-
-        groups = list(StudyGroup.objects.filter(term=term).select_related("discipline"))
-        if not groups:
-            self.stdout.write(self.style.ERROR("No study groups found. Run seed_study_groups first."))
-            return
-
-        created_count = 0
-        missing_courses = set()
-
-        for group in groups:
-            disc_code = group.discipline.code
-            year = group.year_level
-
-            # 1. Lookup Blueprint
-            blueprint = CURRICULUM_BLUEPRINT.get(disc_code)
-            if not blueprint:
-                continue # Skip if we haven't written the blueprint for this discipline yet
-            
-            term_courses = blueprint.get(year, {}).get(season, [])
-
-            # 2. Assign Courses
-            for course_code in term_courses:
-                course = Course.objects.filter(code=course_code).first()
-                if not course:
-                    missing_courses.add(course_code)
-                    continue
-
-                _, created = CourseClass.objects.get_or_create(
-                    course=course,
-                    term=term,
-                    group=group,
-                )
-                if created:
-                    created_count += 1
-
-        self.stdout.write(self.style.SUCCESS(f"Successfully created {created_count} CourseClasses for {term.name}."))
+        terms = Term.objects.all()
         
-        if missing_courses:
-            self.stdout.write(self.style.WARNING(f"WARNING: The following courses are in the blueprint but missing from the database: {', '.join(missing_courses)}"))
+        for term in terms:
+            season = "Fall" if "Fall" in term.name else "Spring"
+            groups = list(StudyGroup.objects.filter(term=term).select_related("discipline"))
+            
+            if not groups:
+                self.stdout.write(self.style.WARNING(f"No study groups found for {term.name}."))
+                continue
+
+            created_count = 0
+            missing_courses = set()
+
+            for group in groups:
+                disc_code = group.discipline.code
+                year = group.year_level
+
+                blueprint = CURRICULUM_BLUEPRINT.get(disc_code)
+                if not blueprint:
+                    continue
+                
+                term_courses = blueprint.get(year, {}).get(season, [])
+
+                for course_code in term_courses:
+                    course = Course.objects.filter(code=course_code).first()
+                    if not course:
+                        missing_courses.add(course_code)
+                        continue
+
+                    _, created = CourseClass.objects.get_or_create(
+                        course=course,
+                        term=term,
+                        group=group,
+                    )
+                    if created:
+                        created_count += 1
+
+            self.stdout.write(self.style.SUCCESS(f"Created {created_count} CourseClasses for {term.name}."))
+            
+            if missing_courses:
+                self.stdout.write(self.style.WARNING(f"WARNING: Missing courses: {', '.join(missing_courses)}"))

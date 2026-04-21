@@ -73,15 +73,6 @@ class Session(TimestampedModel):
         default=SessionType.LECTURE,
     )
 
-    class Meta:
-        constraints = [
-            # A room can only hold one session per timeslot
-            models.UniqueConstraint(
-                fields=["room", "timeslot"],
-                name="unique_room_timeslot",
-            ),
-            # unique_group_timeslot removed — enforced in clean() instead
-        ]
 
     def clean(self):
         errors = {}
