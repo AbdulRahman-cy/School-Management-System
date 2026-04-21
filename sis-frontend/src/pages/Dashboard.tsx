@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useStudentProfile, useEnrollments, useStudentSessions } from "../api";
 import type { Enrollment, Session, GradeEntry, NextClassInfo, CohortStats } from "../types";
 import Attendance from "./Attendance";
+import CourseworkDashboard from "./CourseworkDashboard";
 
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -126,10 +127,8 @@ function GradeBreakdown({ grades }: { grades: GradeEntry[] }) {
           {grades.map(g => (
             <div key={g.id} style={{ fontSize: 11, color: "#64748b", background: "#fff", border: "1px solid #ede9fe", borderRadius: 7, padding: "4px 10px" }}>
               <span style={{ fontWeight: 600, color: "#1e1b4b" }}>{g.component}</span>
-              <span style={{ margin: "0 4px", opacity: 0.4 }}>·</span>{g.score}
-              <span style={{ opacity: 0.4, fontSize: 10 }}> × {parseFloat(g.weight) * 100}%</span>
-              <span style={{ margin: "0 4px", opacity: 0.4 }}>=</span>
-              <span style={{ fontWeight: 600, color: "#7c3aed" }}>{parseFloat(g.weighted_score).toFixed(2)}</span>
+              <span style={{ margin: "0 4px", opacity: 0.4 }}>·</span>
+              <span style={{ fontWeight: 600, color: "#7c3aed" }}>{parseFloat(g.score).toFixed(2)}</span>
             </div>
           ))}
         </div>
@@ -287,7 +286,6 @@ function GradesView({ enrollments, enrollLoading, displayGpa }: GradesViewProps)
                       <span style={{ fontWeight: 600, color: "#1e1b4b" }}>{g.component}</span>
                       <span style={{ color: "#94a3b8" }}>·</span>
                       <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#7c3aed", fontWeight: 600 }}>{parseFloat(g.score).toFixed(1)}</span>
-                      <span style={{ color: "#94a3b8", fontSize: 9 }}>×{(parseFloat(g.weight) * 100).toFixed(0)}%</span>
                     </div>
                   ))}
                 </div>
@@ -794,6 +792,10 @@ export default function UniversityPortal() {
             ) : activeNav === "attendance" ? (
               /* ── Attendance page ─────────────────────────────────────── */
               <Attendance />
+
+            ) : activeNav === "exams" ? (
+              /* ── Coursework page ─────────────────────────────────────── */
+              <CourseworkDashboard />
 
             ) : (
               /* Construction skeleton — all other pages */

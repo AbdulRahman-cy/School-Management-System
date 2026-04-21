@@ -53,6 +53,7 @@ class Discipline(TimestampedModel):
 # Term
 # ─────────────────────────────────────────────────────────────
 
+
 class Term(TimestampedModel):
     name       = models.CharField(max_length=100, unique=True)
     start_date = models.DateField()

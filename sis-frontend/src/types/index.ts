@@ -164,10 +164,8 @@ export interface StudentProfile extends Timestamps {
 export interface GradeEntry extends Timestamps {
   id: number;
   enrollment: number; // FK → Enrollment.id
-  component: string;  // e.g. "Midterm", "Lab Work", "Final Exam"
-  weight: string;     // DecimalField → string e.g. "0.3000"
-  score: string;      // DecimalField → string e.g. "90.55"
-  weighted_score: string; // @property → string e.g. "27.1650"
+  component: string;  // e.g. "Midterm Exam", "Final Exam", "Quiz 1"
+  score: string;      // DecimalField → string, raw score on the component's scale
 }
 
 export interface CohortStats {
@@ -192,14 +190,71 @@ export interface CohortStats {
 export interface Enrollment extends Timestamps {
   id: number;
   student: number;                  // FK → StudentProfile.id
-  course_class: NestedCourseClass;  // nested object (was flat PK)
+  course_class: NestedCourseClass;  // nested object
   lecture_session: number | null;
   tutorial_session: number | null;
   lab_session: number | null;
   grades: GradeEntry[];             // nested via related_name="grades"
-  final_percentage: number;         // @property
-  course_grade_points: number;      // @property
-  cohort_stats: CohortStats | null; // annotated by the serializer
+  final_percentage: number;         // @property — sum of raw scores
+  course_grade_points: number;      // @property — 0.0–4.0 GPA scale
+  cohort_stats: CohortStats | null;
+}
+
+// ─── records.models — Exam ───────────────────────────────────────────────────
+
+export type ExamType = "MIDTERM" | "FINAL" | "PRACTICAL" | "QUIZ";
+
+export interface Exam extends Timestamps {
+  id: number;
+  course_class: number;  // FK → CourseClass.id (flat PK)
+  course_code: string;   // denormalized by serializer
+  course_title: string;  // denormalized by serializer
+  exam_type: ExamType;
+  week: number;
+  max_score: string;     // DecimalField → string
+}
+
+export type ExamResultStatus = "PRESENT" | "ABSENT" | "EXCUSED" | "CHEATING";
+
+export interface ExamResult extends Timestamps {
+  id: number;
+  exam: number;          // FK → Exam.id
+  student: number;       // FK → StudentProfile.id
+  course_code: string;
+  course_title: string;
+  exam_type: ExamType;
+  exam_week: number;
+  max_score: string;
+  status: ExamResultStatus;
+  score: string | null;  // null = held but not yet graded
+}
+
+// ─── records.models — Assignment ─────────────────────────────────────────────
+
+export type AssignmentType = "HOMEWORK" | "PROJECT" | "ESSAY";
+
+export interface Assignment extends Timestamps {
+  id: number;
+  course_class: number;
+  course_code: string;
+  course_title: string;
+  assignment_type: AssignmentType;
+  due_week: number;
+  max_points: string;    // DecimalField → string
+}
+
+export interface StudentSubmission extends Timestamps {
+  id: number;
+  student: number;
+  assignment: number;
+  course_code: string;
+  course_title: string;
+  assignment_type: AssignmentType;
+  due_week: number;
+  max_points: string;
+  score: string | null;  // null = not yet graded
+  submitted_at: string;  // ISO-8601
+  is_late: boolean;      // @property
 }
 
 // ─── UI-layer derived types ───────────────────────────────────────────────────

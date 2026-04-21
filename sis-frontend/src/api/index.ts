@@ -79,3 +79,39 @@ export function useStudentSessions(studentId: number) {
     retry: 1,
   });
 }
+
+// ─── Exam Results & Submissions ───────────────────────────────────────────────
+
+import type { ExamResult, StudentSubmission } from "../types";
+
+async function fetchExamResults(studentId: number): Promise<ExamResult[]> {
+  const { data } = await api.get<ExamResult[]>("records/exam-results/", {
+    params: { student: studentId },
+  });
+  return data;
+}
+
+async function fetchStudentSubmissions(studentId: number): Promise<StudentSubmission[]> {
+  const { data } = await api.get<StudentSubmission[]>("records/student-submissions/", {
+    params: { student: studentId },
+  });
+  return data;
+}
+
+export function useExamResults(studentId: number) {
+  return useQuery({
+    queryKey: ["exam-results", { student: studentId }],
+    queryFn:  () => fetchExamResults(studentId),
+    staleTime: 2 * 60 * 1000,
+    retry: 1,
+  });
+}
+
+export function useStudentSubmissions(studentId: number) {
+  return useQuery({
+    queryKey: ["submissions", { student: studentId }],
+    queryFn:  () => fetchStudentSubmissions(studentId),
+    staleTime: 2 * 60 * 1000,
+    retry: 1,
+  });
+}
