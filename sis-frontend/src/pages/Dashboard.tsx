@@ -5,6 +5,7 @@ import Attendance from "./Attendance";
 import CourseworkDashboard from "./CourseworkDashboard";
 import { getCourseColorTheme } from "../courseColors";
 import ExamSchedulePage from "./ExamSchedulePage";
+import GradesPage from "./GradesPage";
 
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -890,7 +891,7 @@ export default function UniversityPortal() {
               </div>
 
             ) : activeNav === "grades" ? (
-              <GradesView displayGpa={displayGpa} />
+              <GradesPage studentId={STUDENT_ID} displayGpa={displayGpa} />
 
             ) : activeNav === "attendance" ? (
               /* ── Attendance page ─────────────────────────────────────── */
