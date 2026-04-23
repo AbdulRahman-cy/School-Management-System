@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useStudentProfile, useEnrollments, useStudentSessions } from "../api";
+import { useStudentProfile, useEnrollments, useStudentSessions, usePastEnrollments, useUpcomingExams, useUpcomingAssignments } from "../api";
 import type { Enrollment, Session, GradeEntry, NextClassInfo, CohortStats } from "../types";
 import Attendance from "./Attendance";
 import CourseworkDashboard from "./CourseworkDashboard";
+import { getCourseColorTheme } from "../courseColors";
 
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -46,7 +47,7 @@ function resolveNextClass(sessions: Session[]): NextClassInfo | null {
   }
   const next = [...sessions].sort((a, b) => score(a) - score(b))[0];
   if (!next) return null;
-  return { sessionId: next.id, sessionType: next.session_type, courseClass: next.course_class, room: next.room, timeslot: next.timeslot };
+  return { sessionId: next.id, sessionType: next.session_type, courseCode: next.course_code, courseName: next.course_name, room: next.room, timeslot: next.timeslot };
 }
 
 function gradeLabel(gp: number): string {
@@ -61,7 +62,26 @@ function gradeLabel(gp: number): string {
   return "F";
 }
 
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
+// ─── Course code pill ─────────────────────────────────────────────────────────
+
+function CourseCodePill({ code, size = "md" }: { code: string; size?: "sm" | "md" }) {
+  const { bg, color } = getCourseColorTheme(code);
+  const pad  = size === "sm" ? "1px 6px"  : "2px 7px";
+  const font = size === "sm" ? 10         : 11;
+  return (
+    <span style={{
+      fontFamily: "'JetBrains Mono',monospace",
+      fontSize: font, fontWeight: 600,
+      padding: pad, borderRadius: 5,
+      background: bg, color,
+      display: "inline-block", flexShrink: 0,
+    }}>
+      {code}
+    </span>
+  );
+}
+
+
 
 function Skeleton({ w = "100%", h = 16, r = 8 }: { w?: string | number; h?: number; r?: number }) {
   return <div style={{ width: w, height: h, borderRadius: r, background: "linear-gradient(90deg,#f3f0ff 25%,#e9e4ff 50%,#f3f0ff 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite linear", flexShrink: 0 }} />;
@@ -221,9 +241,10 @@ function bucketForGp(gp: number): DistBucket {
   return "F";
 }
 
-interface GradesViewProps { enrollments: Enrollment[] | undefined; enrollLoading: boolean; displayGpa: string; }
+interface GradesViewProps { displayGpa: string; }
 
-function GradesView({ enrollments, enrollLoading, displayGpa }: GradesViewProps) {
+function GradesView({ displayGpa }: GradesViewProps) {
+  const { data: enrollments, isLoading: enrollLoading } = usePastEnrollments(STUDENT_ID);
   const gradedEnrollments = enrollments?.filter(e => e.final_percentage > 0) ?? [];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -270,7 +291,7 @@ function GradesView({ enrollments, enrollLoading, displayGpa }: GradesViewProps)
             <div style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: 18 }}>
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 600, color: "#7c3aed", background: "#f3f0ff", padding: "2px 7px", borderRadius: 5, display: "inline-block", marginBottom: 6 }}>{enr.course_class.course.code}</span>
+                  <div style={{ marginBottom: 6 }}><CourseCodePill code={enr.course_class.course.code} /></div>
                   <div style={{ fontSize: 15, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.3px", lineHeight: 1.3 }}>{enr.course_class.course.title}</div>
                 </div>
                 <div style={{ textAlign: "center", flexShrink: 0, padding: "10px 16px", borderRadius: 12, background: `${accentColor}12`, border: `1.5px solid ${accentColor}30` }}>
@@ -336,6 +357,125 @@ function GradesView({ enrollments, enrollLoading, displayGpa }: GradesViewProps)
   );
 }
 
+// ─── Exam Schedule page ───────────────────────────────────────────────────────
+
+const EXAM_TYPE_META: Record<string, { label: string; bg: string; color: string; border: string }> = {
+  MIDTERM:   { label: "Midterm",   bg: "#ede9fe", color: "#6d28d9", border: "#ddd6fe" },
+  FINAL:     { label: "Final",     bg: "#dbeafe", color: "#1d4ed8", border: "#bfdbfe" },
+  PRACTICAL: { label: "Practical", bg: "#d1fae5", color: "#065f46", border: "#a7f3d0" },
+  QUIZ:      { label: "Quiz",      bg: "#fef3c7", color: "#92400e", border: "#fde68a" },
+};
+
+function ExamSchedulePage({ studentId }: { studentId: number }) {
+  const { data: exams, isLoading, isError } = useUpcomingExams(studentId);
+
+  const sorted = useMemo(
+    () => (exams ?? []).slice().sort((a, b) => a.week - b.week),
+    [exams],
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20, fontFamily: "'Sora',sans-serif" }}>
+      <div className="ani0">
+        <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px" }}>
+          Exam Schedule
+        </h2>
+        <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>
+          Active-term exams · {sorted.length} scheduled
+        </p>
+      </div>
+
+      {isError && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 240 }}>
+          <div style={{ textAlign: "center", padding: 36, background: "#fff", borderRadius: 16, border: "1px solid #fecaca" }}>
+            <div style={{ fontSize: 32, marginBottom: 10 }}>⚠️</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#991b1b" }}>Failed to load exams</div>
+          </div>
+        </div>
+      )}
+
+      {isLoading && (
+        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #ede9fe", overflow: "hidden" }}>
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} style={{ display: "flex", gap: 14, padding: "14px 18px", borderBottom: "1px solid #f8f7ff", alignItems: "center" }}>
+              <Skeleton w={40} h={40} r={8} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
+                <Skeleton w="30%" h={12} />
+                <Skeleton w="55%" h={14} />
+              </div>
+              <Skeleton w={60} h={22} r={6} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!isLoading && !isError && sorted.length === 0 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 240 }}>
+          <div style={{ textAlign: "center", padding: 36, background: "#fff", borderRadius: 16, border: "1px solid #ede9fe" }}>
+            <div style={{ fontSize: 32, marginBottom: 10 }}>📋</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e1b4b" }}>No exams scheduled</div>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
+              Exams will appear here once your instructors schedule them.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!isLoading && !isError && sorted.length > 0 && (
+        <div className="ani1" style={{ background: "#fff", borderRadius: 14, border: "1px solid #ede9fe", overflow: "hidden" }}>
+          <div style={{
+            display: "grid", gridTemplateColumns: "56px 1fr 1fr 96px 80px",
+            padding: "8px 18px", background: "#faf5ff", borderBottom: "1px solid #ede9fe",
+          }}>
+            {["WEEK", "COURSE", "TITLE", "TYPE", "MAX"].map(h => (
+              <div key={h} style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", letterSpacing: ".5px" }}>{h}</div>
+            ))}
+          </div>
+          {sorted.map((exam, i) => {
+            const meta   = EXAM_TYPE_META[exam.exam_type] ?? EXAM_TYPE_META.QUIZ;
+            const isLast = i === sorted.length - 1;
+            return (
+              <div key={exam.id} style={{
+                display: "grid", gridTemplateColumns: "56px 1fr 1fr 96px 80px",
+                padding: "13px 18px", alignItems: "center",
+                borderBottom: isLast ? "none" : "1px solid #f8f7ff",
+                transition: "background .1s",
+              }}
+                onMouseEnter={e => (e.currentTarget.style.background = "#faf5ff")}
+                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+              >
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: "linear-gradient(135deg,#7c3aed,#a78bfa)",
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  color: "#fff", flexShrink: 0,
+                }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1, fontFamily: "'JetBrains Mono',monospace" }}>W{exam.week}</span>
+                  <span style={{ fontSize: 7, opacity: .8, letterSpacing: ".3px" }}>WEEK</span>
+                </div>
+                <CourseCodePill code={exam.course_code} />
+                <div style={{ fontSize: 12.5, fontWeight: 500, color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 12 }}>
+                  {exam.course_title}
+                </div>
+                <span style={{
+                  fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 6,
+                  background: meta.bg, color: meta.color, border: `1px solid ${meta.border}`,
+                  width: "fit-content",
+                }}>
+                  {meta.label}
+                </span>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", textAlign: "right" }}>
+                  {parseFloat(exam.max_score).toFixed(0)} pts
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 const STUDENT_ID = 4;
@@ -346,40 +486,70 @@ export default function UniversityPortal() {
   const [cmdOpen,      setCmdOpen]      = useState(false);
   const [profileOpen,  setProfileOpen]  = useState(false);
   const [expandedRow,  setExpandedRow]  = useState<number | null>(null);
-  const [courseFilter, setCourseFilter] = useState<"all" | "pass" | "fail">("all");
+  const [coursesView,  setCoursesView]  = useState<"active" | "all">("active");
 
   const { data: profile,     isLoading: profileLoading,  isError: profileError  } = useStudentProfile(STUDENT_ID);
-  const { data: enrollments, isLoading: enrollLoading,   isError: enrollError   } = useEnrollments(STUDENT_ID);
+  const { data: enrollments, isLoading: enrollLoading,   isError: enrollError   } = useEnrollments(STUDENT_ID, coursesView);
   const { data: sessions,    isLoading: sessionsLoading, isError: sessionsError } = useStudentSessions(STUDENT_ID);
+  const { data: upcomingExams }       = useUpcomingExams(STUDENT_ID);
+  const { data: upcomingAssignments } = useUpcomingAssignments(STUDENT_ID);
+  const { data: pastEnrollments }     = usePastEnrollments(STUDENT_ID);
 
   if (profileError)  console.error("[useStudentProfile] failed");
   if (enrollError)   console.error("[useEnrollments] failed");
   if (sessionsError) console.error("[useStudentSessions] failed");
 
-  const isLoading = profileLoading || enrollLoading || sessionsLoading;
+  const isLoading = profileLoading || sessionsLoading;
 
-  const computedGpa = useMemo(() => {
-    if (!enrollments?.length) return null;
-    const graded = enrollments.filter(e => e.course_grade_points > 0);
-    if (!graded.length) return null;
-    return (graded.reduce((s, e) => s + e.course_grade_points, 0) / graded.length).toFixed(2);
-  }, [enrollments]);
-
-  const displayGpa      = profile?.cumulative_gpa ? parseFloat(profile.cumulative_gpa).toFixed(2) : (computedGpa ?? "—");
-  const gpaProgress     = displayGpa !== "—" ? (parseFloat(displayGpa) / 4) * 100 : 0;
-  const nextClass       = useMemo(() => sessions ? resolveNextClass(sessions) : null, [sessions]);
+  // GPA comes from profile.cumulative_gpa (past terms, authoritative)
+  const displayGpa  = profile?.cumulative_gpa ? parseFloat(profile.cumulative_gpa).toFixed(2) : "—";
+  const gpaProgress = displayGpa !== "—" ? (parseFloat(displayGpa) / 4) * 100 : 0;
+  const nextClass   = useMemo(() => sessions ? resolveNextClass(sessions) : null, [sessions]);
   const attendanceProgress = useMemo(() => !sessions?.length ? 0 : Math.min(Math.round((sessions.length / 75) * 100), 100), [sessions]);
 
-  const filteredEnrollments = useMemo(() => {
-    if (!enrollments) return [];
-    if (courseFilter === "pass") return enrollments.filter(e => e.course_grade_points >= 2.0);
-    if (courseFilter === "fail") return enrollments.filter(e => e.course_grade_points < 2.0 && e.grades.length > 0);
-    return enrollments;
-  }, [enrollments, courseFilter]);
-
+  // Top performers come from PAST (graded) terms, not the active ungraded term
   const topPerformers = useMemo(() =>
-    !enrollments ? [] : [...enrollments].filter(e => e.final_percentage > 0).sort((a, b) => b.final_percentage - a.final_percentage).slice(0, 4),
-  [enrollments]);
+    !pastEnrollments ? [] : [...pastEnrollments]
+      .filter(e => e.final_percentage > 0)
+      .sort((a, b) => b.final_percentage - a.final_percentage)
+      .slice(0, 5),
+  [pastEnrollments]);
+
+  // Upcoming events — diverse: 1 slot per exam type, then 1 per assignment type, fill to 5
+  const upcomingEvents = useMemo(() => {
+    type EvType = "MIDTERM" | "FINAL" | "QUIZ" | "PRACTICAL" | "HOMEWORK" | "PROJECT" | "ESSAY";
+    interface Ev { id: string; type: EvType; title: string; courseCode: string; week: number; }
+    const all: Ev[] = [];
+
+    for (const e of upcomingExams ?? []) {
+      const type = e.exam_type as EvType;
+      const labelMap: Record<string, string> = { MIDTERM: "Midterm", FINAL: "Final", PRACTICAL: "Practical", QUIZ: "Quiz" };
+      const label = labelMap[e.exam_type] ?? e.exam_type;
+      all.push({ id: `exam-${e.id}`, type, title: `${e.course_code} ${label}`, courseCode: e.course_code, week: e.week });
+    }
+    for (const a of upcomingAssignments ?? []) {
+      const type = a.assignment_type as EvType;
+      const label = a.assignment_type.charAt(0) + a.assignment_type.slice(1).toLowerCase();
+      all.push({ id: `assign-${a.id}`, type, title: `${a.course_code} ${label}`, courseCode: a.course_code, week: a.due_week });
+    }
+
+    // Pass 1: one item per type, earliest week first
+    const priority: EvType[] = ["MIDTERM", "FINAL", "PRACTICAL", "QUIZ", "HOMEWORK", "PROJECT", "ESSAY"];
+    const picked = new Set<string>();
+    const result: Ev[] = [];
+
+    for (const t of priority) {
+      if (result.length >= 5) break;
+      const match = all.filter(e => e.type === t).sort((a, b) => a.week - b.week)[0];
+      if (match && !picked.has(match.id)) { picked.add(match.id); result.push(match); }
+    }
+    // Pass 2: fill remaining slots with earliest un-picked events
+    for (const ev of [...all].sort((a, b) => a.week - b.week)) {
+      if (result.length >= 5) break;
+      if (!picked.has(ev.id)) { picked.add(ev.id); result.push(ev); }
+    }
+    return result.sort((a, b) => a.week - b.week);
+  }, [upcomingExams, upcomingAssignments]);
 
   const scheduleMap = useMemo(() => {
     const map: Record<string, Session[]> = {};
@@ -411,9 +581,9 @@ export default function UniversityPortal() {
   const studentName      = profile ? (profile.user.full_name || `${profile.user.first_name} ${profile.user.last_name}`.trim() || "—") : "—";
 
   const nextClassDisplay = nextClass ? {
-    code: nextClass.courseClass.course.code, title: nextClass.courseClass.course.title,
+    code: nextClass.courseCode, title: nextClass.courseName,
     day: DAY_LABELS[nextClass.timeslot.day], period: PERIOD_LABELS[nextClass.timeslot.period],
-    room: nextClass.room.name, session: nextClass.sessionType,
+    room: nextClass.room, session: nextClass.sessionType,
   } : null;
 
   return (
@@ -570,45 +740,93 @@ export default function UniversityPortal() {
                   )}
                 </div>
 
-                {!isLoading && enrollments?.length === 0 && <EmptyDashboard />}
+                {/* My Courses + Upcoming — two-column layout */}
+                <div className="ani2" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 16, alignItems: "start" }}>
 
-                {!isLoading && (enrollments?.length ?? 0) > 0 && (
-                  <div className="ani2" style={{ background: "#fff", borderRadius: 14, border: "1px solid #ede9fe", overflow: "hidden" }}>
-                    <div style={{ padding: "15px 18px", borderBottom: "1px solid #f3f0ff", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e1b4b" }}>Course Enrollments</div>
-                      <div style={{ display: "flex", gap: 5 }}>
-                        {(["all","pass","fail"] as const).map(f => (
-                          <button key={f} onClick={() => setCourseFilter(f)} style={{ padding: "3px 9px", borderRadius: 6, border: courseFilter === f ? "none" : "1px solid #ede9fe", background: courseFilter === f ? "#7c3aed" : "transparent", color: courseFilter === f ? "#fff" : "#94a3b8", fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize" }}>{f}</button>
+                  {/* ── My Courses widget ────────────────────────────────── */}
+                  <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #ede9fe", overflow: "hidden" }}>
+                    <div style={{ padding: "14px 18px", borderBottom: "1px solid #f3f0ff", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e1b4b" }}>My Courses</div>
+                      <div style={{ display: "flex", gap: 3, background: "#faf5ff", borderRadius: 8, padding: 3, border: "1px solid #ede9fe" }}>
+                        {(["active", "all"] as const).map(v => (
+                          <button key={v} onClick={() => setCoursesView(v)} style={{ padding: "3px 10px", borderRadius: 6, border: "none", background: coursesView === v ? "#7c3aed" : "transparent", color: coursesView === v ? "#fff" : "#94a3b8", fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize", transition: "all .15s" }}>{v === "active" ? "Active" : "All"}</button>
                         ))}
                       </div>
                     </div>
+
+                    {/* Code + Title only — no grades */}
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead>
                         <tr style={{ background: "#faf5ff" }}>
-                          {["Code","Course Title","Final %","Grade","Points"].map(h => <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 9.5, fontWeight: 700, color: "#94a3b8", letterSpacing: ".5px", borderBottom: "1px solid #f3f0ff" }}>{h.toUpperCase()}</th>)}
+                          <th style={{ padding: "8px 14px", textAlign: "left", fontSize: 9.5, fontWeight: 700, color: "#94a3b8", letterSpacing: ".5px", borderBottom: "1px solid #f3f0ff", width: 110 }}>CODE</th>
+                          <th style={{ padding: "8px 14px", textAlign: "left", fontSize: 9.5, fontWeight: 700, color: "#94a3b8", letterSpacing: ".5px", borderBottom: "1px solid #f3f0ff" }}>COURSE TITLE</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {enrollLoading ? [0,1,2,3].map(i => <TableRowSkeleton key={i} />) : filteredEnrollments.map((enr: Enrollment) => {
-                          const label = gradeLabel(enr.course_grade_points);
-                          const isExpanded = expandedRow === enr.id;
-                          return (
-                            <React.Fragment key={enr.id}>
-                              <tr className="tr-exp" onClick={() => setExpandedRow(isExpanded ? null : enr.id)} style={{ borderBottom: isExpanded ? "none" : "1px solid #fafafa", cursor: "pointer" }}>
-                                <td style={{ padding: "11px 14px" }}><span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10.5, fontWeight: 500, color: "#7c3aed", background: "#f3f0ff", padding: "2px 6px", borderRadius: 5 }}>{enr.course_class.course.code}</span></td>
-                                <td style={{ padding: "11px 14px", fontSize: 12.5, color: "#374151", fontWeight: 500 }}>{enr.course_class.course.title}</td>
-                                <td style={{ padding: "11px 14px", fontSize: 12.5, fontFamily: "'JetBrains Mono',monospace", color: "#1e1b4b", fontWeight: 600 }}>{enr.final_percentage.toFixed(1)}%</td>
-                                <td style={{ padding: "11px 14px" }}><GradeChip label={label} gp={enr.course_grade_points} /></td>
-                                <td style={{ padding: "11px 14px", fontSize: 12.5, fontFamily: "'JetBrains Mono',monospace", color: "#1e1b4b", fontWeight: 600 }}>{enr.course_grade_points.toFixed(1)}<span style={{ fontSize: 9, color: "#94a3b8", marginLeft: 4 }}>▾</span></td>
+                        {enrollLoading
+                          ? [0,1,2,3,4].map(i => (
+                              <tr key={i}><td style={{ padding: "10px 14px" }}><Skeleton w={70} h={14} /></td><td style={{ padding: "10px 14px" }}><Skeleton w="70%" h={14} /></td></tr>
+                            ))
+                          : (enrollments ?? []).map((enr: Enrollment) => (
+                              <tr key={enr.id} style={{ borderBottom: "1px solid #fafafa" }}
+                                onMouseEnter={e => (e.currentTarget.style.background = "#faf5ff")}
+                                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                              >
+                                <td style={{ padding: "10px 14px" }}>
+                                  <CourseCodePill code={enr.course_class.course.code} />
+                                </td>
+                                <td style={{ padding: "10px 14px", fontSize: 12.5, color: "#374151", fontWeight: 500 }}>{enr.course_class.course.title}</td>
                               </tr>
-                              {isExpanded && <GradeBreakdown grades={enr.grades} />}
-                            </React.Fragment>
-                          );
-                        })}
+                            ))
+                        }
+                        {!enrollLoading && (enrollments ?? []).length === 0 && (
+                          <tr><td colSpan={2} style={{ padding: "24px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No courses found.</td></tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
-                )}
+
+                  {/* ── Upcoming widget ───────────────────────────────────── */}
+                  <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #ede9fe", overflow: "hidden" }}>
+                    <div style={{ padding: "14px 18px", borderBottom: "1px solid #f3f0ff" }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e1b4b" }}>Upcoming</div>
+                      <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2 }}>Deadlines & exams</div>
+                    </div>
+                    <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                      {upcomingEvents.length === 0 && (
+                        <div style={{ padding: "20px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No upcoming events.</div>
+                      )}
+                      {upcomingEvents.map(ev => {
+                        const tagStyles: Record<string, { bg: string; color: string }> = {
+                          MIDTERM:   { bg: "#ede9fe", color: "#6d28d9" },
+                          FINAL:     { bg: "#dbeafe", color: "#1d4ed8" },
+                          PRACTICAL: { bg: "#d1fae5", color: "#065f46" },
+                          QUIZ:      { bg: "#fef3c7", color: "#92400e" },
+                          HOMEWORK:  { bg: "#fef9c3", color: "#b45309" },
+                          PROJECT:   { bg: "#dcfce7", color: "#166534" },
+                          ESSAY:     { bg: "#f3e8ff", color: "#7e22ce" },
+                        };
+                        const tag = tagStyles[ev.type] ?? tagStyles.EXAM;
+                        return (
+                          <div key={ev.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 11px", borderRadius: 9, background: "#faf5ff" }}>
+                            {/* Week badge */}
+                            <div style={{ width: 34, minWidth: 34, height: 38, borderRadius: 7, background: "linear-gradient(135deg,#7c3aed,#a78bfa)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", flexShrink: 0 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1, fontFamily: "'JetBrains Mono',monospace" }}>W{ev.week}</span>
+                              <span style={{ fontSize: 7, fontWeight: 500, opacity: .8, letterSpacing: ".3px" }}>WEEK</span>
+                            </div>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 11.5, fontWeight: 600, color: "#1e1b4b", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.title}</div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                <CourseCodePill code={ev.courseCode} size="sm" />
+                                <span style={{ fontSize: 9.5, fontWeight: 700, padding: "1px 7px", borderRadius: 4, background: tag.bg, color: tag.color }}>{ev.type}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </>
 
             ) : activeNav === "profile" ? (
@@ -685,7 +903,7 @@ export default function UniversityPortal() {
                             <div style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0, background: isGold ? "linear-gradient(135deg,#f59e0b,#fbbf24)" : isSilver ? "linear-gradient(135deg,#94a3b8,#cbd5e1)" : isBronze ? "linear-gradient(135deg,#cd7c2f,#d97706)" : "#ede9fe", display: "flex", alignItems: "center", justifyContent: "center", color: rank < 3 ? "#fff" : "#7c3aed", fontSize: 11, fontWeight: 800, boxShadow: isGold ? "0 4px 12px rgba(245,158,11,0.35)" : "none" }}>#{rank+1}</div>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }}>
-                                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 600, color: "#7c3aed", background: "#ede9fe", padding: "2px 7px", borderRadius: 5, flexShrink: 0 }}>{enr.course_class.course.code}</span>
+                                <CourseCodePill code={enr.course_class.course.code} size="sm" />
                                 <span style={{ fontSize: 12, color: "#374151", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{enr.course_class.course.title}</span>
                               </div>
                               <div style={{ height: 3, background: "#e9e4ff", borderRadius: 99 }}><div style={{ width: `${pct}%`, height: "100%", background: barColor, borderRadius: 99, transition: "width 1s ease" }} /></div>
@@ -763,12 +981,12 @@ export default function UniversityPortal() {
                                               onMouseEnter={e=>{(e.currentTarget as HTMLDivElement).style.transform="translateY(-2px)";(e.currentTarget as HTMLDivElement).style.boxShadow="0 6px 18px rgba(124,58,237,0.12)";}}
                                               onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.transform="";(e.currentTarget as HTMLDivElement).style.boxShadow="";}}>
                                               <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:4}}>
-                                                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:700,color:"#1e1b4b",letterSpacing:"-.3px",lineHeight:1.2}}>{s.course_class.course.code}</span>
+                                                <CourseCodePill code={s.course_code} size="sm" />
                                                 <span style={{fontSize:8,fontWeight:700,padding:"2px 5px",borderRadius:4,background:st.badge,color:st.badgeTxt,letterSpacing:".3px",flexShrink:0,lineHeight:1.4}}>{s.session_type.slice(0,3)}</span>
                                               </div>
-                                              <div style={{fontSize:9.5,color:"#64748b",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",lineHeight:1.35}}>{s.course_class.course.title}</div>
+                                              <div style={{fontSize:9.5,color:"#64748b",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",lineHeight:1.35}}>{s.course_name}</div>
                                               <div style={{display:"flex",alignItems:"center",gap:3,fontSize:9,color:"#94a3b8",fontWeight:500}}>
-                                                <div style={{width:6,height:6,borderRadius:"50%",background:st.dot,flexShrink:0}} />{s.room.name}
+                                                <div style={{width:6,height:6,borderRadius:"50%",background:st.dot,flexShrink:0}} />{s.room}
                                               </div>
                                             </div>
                                           );
@@ -787,15 +1005,14 @@ export default function UniversityPortal() {
               </div>
 
             ) : activeNav === "grades" ? (
-              <GradesView enrollments={enrollments} enrollLoading={enrollLoading} displayGpa={displayGpa} />
+              <GradesView displayGpa={displayGpa} />
 
             ) : activeNav === "attendance" ? (
               /* ── Attendance page ─────────────────────────────────────── */
               <Attendance />
 
             ) : activeNav === "exams" ? (
-              /* ── Coursework page ─────────────────────────────────────── */
-              <CourseworkDashboard />
+              <ExamSchedulePage studentId={STUDENT_ID} />
 
             ) : (
               /* Construction skeleton — all other pages */

@@ -121,10 +121,11 @@ export interface NestedRoom {
 
 export interface Session extends Timestamps {
   id: number;
-  course_class: NestedCourseClass; // nested object (was flat PK)
+  course_code: string;     // flat — from course_class.course.code via source=
+  course_name: string;     // flat — from course_class.course.title via source=
   session_type: SessionType;
-  timeslot: Timeslot;              // nested object
-  room: NestedRoom;                // nested object (was flat PK)
+  timeslot: Timeslot;      // still nested
+  room: string;            // flat string — room.name via source=
 }
 
 // ─── users.models ────────────────────────────────────────────────────────────
@@ -165,7 +166,9 @@ export interface GradeEntry extends Timestamps {
   id: number;
   enrollment: number; // FK → Enrollment.id
   component: string;  // e.g. "Midterm Exam", "Final Exam", "Quiz 1"
-  score: string;      // DecimalField → string, raw score on the component's scale
+  weight: string;     // DecimalField → string e.g. "0.3000" (30% contribution)
+  score: string;      // DecimalField → string e.g. "90.55" (out of 100)
+  weighted_score: string; // @property → string e.g. "27.17"
 }
 
 export interface CohortStats {
@@ -273,7 +276,8 @@ export interface EnrollmentRow {
 export interface NextClassInfo {
   sessionId: number;
   sessionType: SessionType;
-  courseClass: NestedCourseClass; // full nested object
-  room: NestedRoom;               // full nested object
+  courseCode: string;   // flat from ScheduleSessionSerializer
+  courseName: string;   // flat from ScheduleSessionSerializer
+  room: string;         // flat string — room.name
   timeslot: Timeslot;
 }

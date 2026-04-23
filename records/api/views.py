@@ -5,6 +5,9 @@ from .permissions import IsAdminOrReadOnly
 from records.models import Enrollment, GradeEntry, AttendanceRecord, Exam, ExamResult, Assignment, StudentSubmission
 from .serializers import EnrollmentSerializer, GradeEntrySerializer, AttendanceRecordSerializer, ExamSerializer, ExamResultSerializer, AssignmentSerializer, StudentSubmissionSerializer
 
+
+
+
 class EnrollmentViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Enrollments to be viewed or edited.
@@ -12,20 +15,35 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     serializer_class = EnrollmentSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     
-    # Allows fetching /api/enrollments/?student=5 or ?course_class=12
     filterset_fields = ['student', 'course_class']
     ordering_fields = ['created_at']
 
-
     def get_queryset(self):
-        # Optimization: prefetch 'grades' because the serializer nests them.
-        # select_related for foreign keys to avoid massive query bloat.
-        return Enrollment.objects.all().select_related(
+        
+        queryset = Enrollment.objects.select_related(
             'student', 
             'course_class'
         ).prefetch_related(
             'grades'
         )
+
+        
+        term_status = self.request.query_params.get('term_status')
+
+        
+        if term_status == 'past':
+            # For the Grades sidebar: /api/enrollments/?student=4&term_status=past
+            queryset = queryset.filter(course_class__term__is_active=False)
+            
+        elif term_status == 'all':
+            # /api/enrollments/?student=4&term_status=all
+            pass 
+            
+        else:
+            # /api/enrollments/?student=4
+            queryset = queryset.filter(course_class__term__is_active=True)
+
+        return queryset
 
 
 class GradeEntryViewSet(viewsets.ModelViewSet):
@@ -43,19 +61,7 @@ class GradeEntryViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return GradeEntry.objects.all().select_related('enrollment')
     
-class AttendanceViewSet(viewsets.ModelViewSet):
-    serializer_class = AttendanceRecordSerializer
 
-    def get_queryset(self):
-        qs = AttendanceRecord.objects.select_related(
-            "session__course_class__course",  # for code, title
-            "session__timeslot",              # for day/period display
-            "student__user",                  # if you ever need the name
-        )
-        student_id = self.request.query_params.get("student")
-        if student_id:
-            qs = qs.filter(student_id=student_id)
-        return qs
     
 
 class AttendanceViewSet(viewsets.ModelViewSet):
@@ -74,7 +80,47 @@ class ExamViewSet(viewsets.ModelViewSet):
     filterset_fields = ["course_class", "exam_type"]
 
     def get_queryset(self):
-        return Exam.objects.select_related("course_class__course")
+        queryset = Exam.objects.select_related("course_class__course")
+        
+        term_status = self.request.query_params.get("term_status")
+        student_id = self.request.query_params.get("student") # <-- Catch the student ID
+
+        # 1. Filter by term
+        if term_status == "active":
+            queryset = queryset.filter(course_class__term__is_active=True)
+        elif term_status == "past":
+            queryset = queryset.filter(course_class__term__is_active=False)
+            
+        # 2. Filter by enrolled student
+        if student_id:
+            queryset = queryset.filter(course_class__enrollments__student_id=student_id)
+
+        return queryset
+
+
+class AssignmentViewSet(viewsets.ModelViewSet):
+    serializer_class = AssignmentSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["course_class", "assignment_type"]
+
+    def get_queryset(self):
+        queryset = Assignment.objects.select_related("course_class__course")
+        
+        term_status = self.request.query_params.get("term_status")
+        student_id = self.request.query_params.get("student") # <-- Catch the student ID
+
+        # 1. Filter by term
+        if term_status == "active":
+            queryset = queryset.filter(course_class__term__is_active=True)
+        elif term_status == "past":
+            queryset = queryset.filter(course_class__term__is_active=False)
+            
+        # 2. Filter by enrolled student
+        if student_id:
+            queryset = queryset.filter(course_class__enrollments__student_id=student_id)
+
+        return queryset
+    
 
 class ExamResultViewSet(viewsets.ModelViewSet):
     serializer_class = ExamResultSerializer
@@ -86,13 +132,6 @@ class ExamResultViewSet(viewsets.ModelViewSet):
             "exam__course_class__course",
         )
 
-class AssignmentViewSet(viewsets.ModelViewSet):
-    serializer_class = AssignmentSerializer
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ["course_class", "assignment_type"]
-
-    def get_queryset(self):
-        return Assignment.objects.select_related("course_class__course")
 
 class StudentSubmissionViewSet(viewsets.ModelViewSet):
     serializer_class = StudentSubmissionSerializer
