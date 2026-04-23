@@ -10,7 +10,7 @@ router.register(r'exams', ExamViewSet, basename='exam')
 router.register(r'exam-results', ExamResultViewSet, basename='examresult')      
 router.register(r'assignments', AssignmentViewSet, basename='assignment')
 router.register(r'student-submissions', StudentSubmissionViewSet, basename='studentsubmission')
-
+router.register(r'attendance', AttendanceViewSet, basename='attendance')
 urlpatterns = [
     path('', include(router.urls)),
 ]

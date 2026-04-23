@@ -62,17 +62,29 @@ class GradeEntryViewSet(viewsets.ModelViewSet):
         return GradeEntry.objects.all().select_related('enrollment')
     
 
-    
-
 class AttendanceViewSet(viewsets.ModelViewSet):
     serializer_class = AttendanceRecordSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["student", "session"]
 
     def get_queryset(self):
-        return AttendanceRecord.objects.select_related(
+        queryset = AttendanceRecord.objects.select_related(
             "session__course_class__course",
         )
+        
+        term_status = self.request.query_params.get("term_status")
+        student_id = self.request.query_params.get("student")
+
+        if term_status == "active":
+            queryset = queryset.filter(session__course_class__term__is_active=True)
+        elif term_status == "past":
+            queryset = queryset.filter(session__course_class__term__is_active=False)
+
+        if student_id:
+            queryset = queryset.filter(student_id=student_id)
+
+        return queryset
+    
 
 class ExamViewSet(viewsets.ModelViewSet):
     serializer_class = ExamSerializer

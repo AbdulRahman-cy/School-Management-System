@@ -4,6 +4,7 @@ import type { Enrollment, Session, GradeEntry, NextClassInfo, CohortStats } from
 import Attendance from "./Attendance";
 import CourseworkDashboard from "./CourseworkDashboard";
 import { getCourseColorTheme } from "../courseColors";
+import ExamSchedulePage from "./ExamSchedulePage";
 
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -359,122 +360,6 @@ function GradesView({ displayGpa }: GradesViewProps) {
 
 // ─── Exam Schedule page ───────────────────────────────────────────────────────
 
-const EXAM_TYPE_META: Record<string, { label: string; bg: string; color: string; border: string }> = {
-  MIDTERM:   { label: "Midterm",   bg: "#ede9fe", color: "#6d28d9", border: "#ddd6fe" },
-  FINAL:     { label: "Final",     bg: "#dbeafe", color: "#1d4ed8", border: "#bfdbfe" },
-  PRACTICAL: { label: "Practical", bg: "#d1fae5", color: "#065f46", border: "#a7f3d0" },
-  QUIZ:      { label: "Quiz",      bg: "#fef3c7", color: "#92400e", border: "#fde68a" },
-};
-
-function ExamSchedulePage({ studentId }: { studentId: number }) {
-  const { data: exams, isLoading, isError } = useUpcomingExams(studentId);
-
-  const sorted = useMemo(
-    () => (exams ?? []).slice().sort((a, b) => a.week - b.week),
-    [exams],
-  );
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20, fontFamily: "'Sora',sans-serif" }}>
-      <div className="ani0">
-        <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px" }}>
-          Exam Schedule
-        </h2>
-        <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>
-          Active-term exams · {sorted.length} scheduled
-        </p>
-      </div>
-
-      {isError && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 240 }}>
-          <div style={{ textAlign: "center", padding: 36, background: "#fff", borderRadius: 16, border: "1px solid #fecaca" }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>⚠️</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#991b1b" }}>Failed to load exams</div>
-          </div>
-        </div>
-      )}
-
-      {isLoading && (
-        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #ede9fe", overflow: "hidden" }}>
-          {[0, 1, 2, 3].map(i => (
-            <div key={i} style={{ display: "flex", gap: 14, padding: "14px 18px", borderBottom: "1px solid #f8f7ff", alignItems: "center" }}>
-              <Skeleton w={40} h={40} r={8} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
-                <Skeleton w="30%" h={12} />
-                <Skeleton w="55%" h={14} />
-              </div>
-              <Skeleton w={60} h={22} r={6} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {!isLoading && !isError && sorted.length === 0 && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 240 }}>
-          <div style={{ textAlign: "center", padding: 36, background: "#fff", borderRadius: 16, border: "1px solid #ede9fe" }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>📋</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e1b4b" }}>No exams scheduled</div>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
-              Exams will appear here once your instructors schedule them.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!isLoading && !isError && sorted.length > 0 && (
-        <div className="ani1" style={{ background: "#fff", borderRadius: 14, border: "1px solid #ede9fe", overflow: "hidden" }}>
-          <div style={{
-            display: "grid", gridTemplateColumns: "56px 1fr 1fr 96px 80px",
-            padding: "8px 18px", background: "#faf5ff", borderBottom: "1px solid #ede9fe",
-          }}>
-            {["WEEK", "COURSE", "TITLE", "TYPE", "MAX"].map(h => (
-              <div key={h} style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", letterSpacing: ".5px" }}>{h}</div>
-            ))}
-          </div>
-          {sorted.map((exam, i) => {
-            const meta   = EXAM_TYPE_META[exam.exam_type] ?? EXAM_TYPE_META.QUIZ;
-            const isLast = i === sorted.length - 1;
-            return (
-              <div key={exam.id} style={{
-                display: "grid", gridTemplateColumns: "56px 1fr 1fr 96px 80px",
-                padding: "13px 18px", alignItems: "center",
-                borderBottom: isLast ? "none" : "1px solid #f8f7ff",
-                transition: "background .1s",
-              }}
-                onMouseEnter={e => (e.currentTarget.style.background = "#faf5ff")}
-                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-              >
-                <div style={{
-                  width: 36, height: 36, borderRadius: 8,
-                  background: "linear-gradient(135deg,#7c3aed,#a78bfa)",
-                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                  color: "#fff", flexShrink: 0,
-                }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1, fontFamily: "'JetBrains Mono',monospace" }}>W{exam.week}</span>
-                  <span style={{ fontSize: 7, opacity: .8, letterSpacing: ".3px" }}>WEEK</span>
-                </div>
-                <CourseCodePill code={exam.course_code} />
-                <div style={{ fontSize: 12.5, fontWeight: 500, color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 12 }}>
-                  {exam.course_title}
-                </div>
-                <span style={{
-                  fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 6,
-                  background: meta.bg, color: meta.color, border: `1px solid ${meta.border}`,
-                  width: "fit-content",
-                }}>
-                  {meta.label}
-                </span>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", textAlign: "right" }}>
-                  {parseFloat(exam.max_score).toFixed(0)} pts
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 

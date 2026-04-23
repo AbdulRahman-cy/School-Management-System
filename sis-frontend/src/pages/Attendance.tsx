@@ -1,57 +1,44 @@
 import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+// API response shape from GET /api/records/attendance/?student={id}&term_status=active
 interface AttendanceRecord {
   id: number;
+  student: number;
+  session: number;
   course_code: string;
   course_title: string;
   session_type: "LECTURE" | "LAB" | "TUTORIAL";
-  date: string;
-  status: "PRESENT" | "ABSENT" | "EXCUSED";
+  week: number;
+  term_name: string;  // denormalized — session.course_class.term.name via source=
+  status: "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
+  created_at: string; // ISO-8601 — used for chronological sort
 }
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+// ─── TASK 1: Data fetching hook ───────────────────────────────────────────────
 
-const MOCK: AttendanceRecord[] = [
-  { id:  1, course_code: "BME 326",  course_title: "Biomechanics",                 session_type: "LECTURE",  date: "2025-09-07", status: "PRESENT" },
-  { id:  2, course_code: "BME 326",  course_title: "Biomechanics",                 session_type: "LAB",      date: "2025-09-09", status: "PRESENT" },
-  { id:  3, course_code: "BME 326",  course_title: "Biomechanics",                 session_type: "TUTORIAL", date: "2025-09-11", status: "PRESENT" },
-  { id:  4, course_code: "BME 326",  course_title: "Biomechanics",                 session_type: "LECTURE",  date: "2025-09-14", status: "ABSENT"  },
-  { id:  5, course_code: "BME 326",  course_title: "Biomechanics",                 session_type: "LAB",      date: "2025-09-16", status: "PRESENT" },
-  { id:  6, course_code: "BME 326",  course_title: "Biomechanics",                 session_type: "TUTORIAL", date: "2025-09-18", status: "PRESENT" },
-  { id:  7, course_code: "BME 326",  course_title: "Biomechanics",                 session_type: "LECTURE",  date: "2025-09-21", status: "PRESENT" },
-  { id:  8, course_code: "BME 326",  course_title: "Biomechanics",                 session_type: "LAB",      date: "2025-09-23", status: "PRESENT" },
-  { id:  9, course_code: "BME 326",  course_title: "Biomechanics",                 session_type: "LECTURE",  date: "2025-09-28", status: "EXCUSED" },
-  { id: 10, course_code: "BME 326",  course_title: "Biomechanics",                 session_type: "TUTORIAL", date: "2025-09-30", status: "PRESENT" },
-  { id: 11, course_code: "CS 301",   course_title: "Data Structures & Algorithms", session_type: "LECTURE",  date: "2025-09-07", status: "PRESENT" },
-  { id: 12, course_code: "CS 301",   course_title: "Data Structures & Algorithms", session_type: "TUTORIAL", date: "2025-09-10", status: "PRESENT" },
-  { id: 13, course_code: "CS 301",   course_title: "Data Structures & Algorithms", session_type: "LECTURE",  date: "2025-09-14", status: "PRESENT" },
-  { id: 14, course_code: "CS 301",   course_title: "Data Structures & Algorithms", session_type: "LAB",      date: "2025-09-17", status: "ABSENT"  },
-  { id: 15, course_code: "CS 301",   course_title: "Data Structures & Algorithms", session_type: "LECTURE",  date: "2025-09-21", status: "ABSENT"  },
-  { id: 16, course_code: "CS 301",   course_title: "Data Structures & Algorithms", session_type: "TUTORIAL", date: "2025-09-24", status: "PRESENT" },
-  { id: 17, course_code: "CS 301",   course_title: "Data Structures & Algorithms", session_type: "LECTURE",  date: "2025-09-28", status: "ABSENT"  },
-  { id: 18, course_code: "CS 301",   course_title: "Data Structures & Algorithms", session_type: "LAB",      date: "2025-10-01", status: "PRESENT" },
-  { id: 19, course_code: "NET 201",  course_title: "Computer Networks",            session_type: "LECTURE",  date: "2025-09-08", status: "PRESENT" },
-  { id: 20, course_code: "NET 201",  course_title: "Computer Networks",            session_type: "LAB",      date: "2025-09-10", status: "PRESENT" },
-  { id: 21, course_code: "NET 201",  course_title: "Computer Networks",            session_type: "LECTURE",  date: "2025-09-15", status: "PRESENT" },
-  { id: 22, course_code: "NET 201",  course_title: "Computer Networks",            session_type: "TUTORIAL", date: "2025-09-17", status: "PRESENT" },
-  { id: 23, course_code: "NET 201",  course_title: "Computer Networks",            session_type: "LECTURE",  date: "2025-09-22", status: "PRESENT" },
-  { id: 24, course_code: "NET 201",  course_title: "Computer Networks",            session_type: "LAB",      date: "2025-09-24", status: "PRESENT" },
-  { id: 25, course_code: "NET 201",  course_title: "Computer Networks",            session_type: "LECTURE",  date: "2025-09-29", status: "PRESENT" },
-  { id: 26, course_code: "NET 201",  course_title: "Computer Networks",            session_type: "TUTORIAL", date: "2025-10-01", status: "PRESENT" },
-  { id: 27, course_code: "MATH 301", course_title: "Numerical Analysis",           session_type: "LECTURE",  date: "2025-09-08", status: "PRESENT" },
-  { id: 28, course_code: "MATH 301", course_title: "Numerical Analysis",           session_type: "TUTORIAL", date: "2025-09-11", status: "ABSENT"  },
-  { id: 29, course_code: "MATH 301", course_title: "Numerical Analysis",           session_type: "LECTURE",  date: "2025-09-15", status: "PRESENT" },
-  { id: 30, course_code: "MATH 301", course_title: "Numerical Analysis",           session_type: "TUTORIAL", date: "2025-09-18", status: "ABSENT"  },
-  { id: 31, course_code: "MATH 301", course_title: "Numerical Analysis",           session_type: "LECTURE",  date: "2025-09-22", status: "ABSENT"  },
-  { id: 32, course_code: "MATH 301", course_title: "Numerical Analysis",           session_type: "TUTORIAL", date: "2025-09-25", status: "PRESENT" },
-  { id: 33, course_code: "MATH 301", course_title: "Numerical Analysis",           session_type: "LECTURE",  date: "2025-09-29", status: "ABSENT"  },
-  { id: 34, course_code: "MATH 301", course_title: "Numerical Analysis",           session_type: "TUTORIAL", date: "2025-10-02", status: "PRESENT" },
-];
+const STUDENT_ID = 4;
+
+function useAttendance(studentId: number, termView: "active" | "past") {
+  return useQuery<AttendanceRecord[]>({
+    queryKey: ["attendance", { student: studentId, termView }],
+    queryFn: async () => {
+      const { data } = await api.get<AttendanceRecord[]>("records/attendance/", {
+        params: { student: studentId, term_status: termView },
+      });
+      return data;
+    },
+    staleTime: 2 * 60 * 1000,
+    retry: 1,
+  });
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Format ISO-8601 (created_at) → "14 Sept", "2 Oct", etc.
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
@@ -119,6 +106,7 @@ function StatusBadge({ status }: { status: AttendanceRecord["status"] }) {
   const styles = {
     PRESENT: { bg: "#d1fae5", color: "#065f46" },
     ABSENT:  { bg: "#fee2e2", color: "#991b1b" },
+    LATE:    { bg: "#fef3c7", color: "#92400e" },
     EXCUSED: { bg: "#fef3c7", color: "#92400e" },
   };
   const s = styles[status];
@@ -131,9 +119,17 @@ function StatusBadge({ status }: { status: AttendanceRecord["status"] }) {
     }}>
       {status === "PRESENT" && <IconCheck />}
       {status === "ABSENT"  && <IconX />}
-      {status === "EXCUSED" && <IconMinus />}
+      {(status === "EXCUSED" || status === "LATE") && <IconMinus />}
       {status}
     </span>
+  );
+}
+
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+
+function Skeleton({ w = "100%", h = 16, r = 8 }: { w?: string | number; h?: number; r?: number }) {
+  return (
+    <div style={{ width: w, height: h, borderRadius: r, background: "linear-gradient(90deg,#f3f0ff 25%,#e9e4ff 50%,#f3f0ff 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite linear", flexShrink: 0 }} />
   );
 }
 
@@ -149,60 +145,210 @@ interface CourseStat {
 export default function Attendance() {
   const [activeTab,      setActiveTab]      = useState<"overview" | "history">("overview");
   const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
+  const [termView,       setTermView]        = useState<"active" | "past">("active");
+  const [selectedTerm,   setSelectedTerm]    = useState<string | null>(null);
 
-  // ── Overall stats ─────────────────────────────────────────────────────────
+  // ── TASK 1: Fetch live data ────────────────────────────────────────────────
+  const { data: records = [], isLoading, isError } = useAttendance(STUDENT_ID, termView);
+
+  // ── Past term names — extracted from all past records ────────────────────
+  // Used to build the term selector pills shown when termView === "past".
+  const pastTermNames = useMemo(() => {
+    if (termView !== "past") return [];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const r of records) {
+      if (!seen.has(r.term_name)) { seen.add(r.term_name); result.push(r.term_name); }
+    }
+    return result.sort();
+  }, [records, termView]);
+
+  // Auto-select the first past term when the list first loads
+  const resolvedTerm = useMemo(() => {
+    if (termView !== "past") return null;
+    if (selectedTerm && pastTermNames.includes(selectedTerm)) return selectedTerm;
+    return pastTermNames[0] ?? null;
+  }, [termView, selectedTerm, pastTermNames]);
+
+  // Records scoped to the selected past term (or all records for active term)
+  const scopedRecords = useMemo(() => {
+    if (termView === "active") return records;
+    return resolvedTerm ? records.filter(r => r.term_name === resolvedTerm) : [];
+  }, [records, termView, resolvedTerm]);
+
+  // ── TASK 1: Overall stats ─────────────────────────────────────────────────
   const overall = useMemo(() => {
-    const total   = MOCK.length;
-    const present = MOCK.filter(r => r.status === "PRESENT").length;
-    const absent  = MOCK.filter(r => r.status === "ABSENT").length;
-    const excused = MOCK.filter(r => r.status === "EXCUSED").length;
-    return { total, present, absent, excused, rate: Math.round(((present + excused) / total) * 100) };
-  }, []);
+    const total    = scopedRecords.length;
+    const attended = scopedRecords.filter(r => r.status === "PRESENT" || r.status === "LATE").length;
+    const absent   = scopedRecords.filter(r => r.status === "ABSENT").length;
+    const excused  = scopedRecords.filter(r => r.status === "EXCUSED").length;
+    const denominator = total - excused;
+    const rate = denominator > 0 ? Math.round((attended / denominator) * 100) : 0;
+    return { total, attended, absent, excused, rate };
+  }, [scopedRecords]);
 
-  // ── Per-course breakdown ──────────────────────────────────────────────────
+  // ── TASK 2: Per-course breakdown ──────────────────────────────────────────
   const courseStats: CourseStat[] = useMemo(() => {
     const map: Record<string, CourseStat> = {};
-    for (const r of MOCK) {
-      if (!map[r.course_code]) map[r.course_code] = { code: r.course_code, title: r.course_title, total: 0, present: 0, absent: 0, excused: 0, rate: 0 };
+    for (const r of scopedRecords) {
+      if (!map[r.course_code]) {
+        map[r.course_code] = { code: r.course_code, title: r.course_title, total: 0, present: 0, absent: 0, excused: 0, rate: 0 };
+      }
       const s = map[r.course_code];
       s.total++;
-      if (r.status === "PRESENT") s.present++;
+      if (r.status === "PRESENT" || r.status === "LATE") s.present++;
       else if (r.status === "ABSENT") s.absent++;
       else s.excused++;
     }
     return Object.values(map)
-      .map(s => ({ ...s, rate: Math.round(((s.present + s.excused) / s.total) * 100) }))
+      .map(s => {
+        const denom = s.total - s.excused;
+        return { ...s, rate: denom > 0 ? Math.round((s.present / denom) * 100) : 0 };
+      })
       .sort((a, b) => a.code.localeCompare(b.code));
-  }, []);
+  }, [scopedRecords]);
 
-  // ── Current streak ────────────────────────────────────────────────────────
+  // ── Streak ────────────────────────────────────────────────────────────────
+  // Active term → CURRENT STREAK: count back from newest until a non-present record.
+  // Past term   → BEST STREAK: scan full sorted list for the longest consecutive run.
   const streak = useMemo(() => {
-    let n = 0;
-    for (const r of [...MOCK].sort((a, b) => b.date.localeCompare(a.date))) {
-      if (r.status === "PRESENT" || r.status === "EXCUSED") n++;
-      else break;
+    const sorted = [...scopedRecords].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    if (termView === "active") {
+      let n = 0;
+      for (const r of [...sorted].reverse()) {
+        if (r.status === "PRESENT" || r.status === "LATE") n++;
+        else break;
+      }
+      return n;
     }
-    return n;
-  }, []);
+    // Best streak — full scan
+    let best = 0, cur = 0;
+    for (const r of sorted) {
+      if (r.status === "PRESENT" || r.status === "LATE") { cur++; best = Math.max(best, cur); }
+      else cur = 0;
+    }
+    return best;
+  }, [scopedRecords, termView]);
 
-  // ── Filtered history ──────────────────────────────────────────────────────
+  // ── TASK 3: Session history filter pills (unique course codes) ────────────
+  const uniqueCourses = useMemo(() => {
+    const seen = new Set<string>();
+    const result: { code: string; title: string }[] = [];
+    for (const r of scopedRecords) {
+      if (!seen.has(r.course_code)) {
+        seen.add(r.course_code);
+        result.push({ code: r.course_code, title: r.course_title });
+      }
+    }
+    return result.sort((a, b) => a.code.localeCompare(b.code));
+  }, [scopedRecords]);
+
+  // ── TASK 3: Filtered history list ─────────────────────────────────────────
   const filteredHistory = useMemo(() => {
-    const base = [...MOCK].sort((a, b) => b.date.localeCompare(a.date));
-    return selectedCourse ? base.filter(r => r.course_code === selectedCourse) : base.slice(0, 10);
-  }, [selectedCourse]);
+    const sorted = [...scopedRecords].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return selectedCourse ? sorted.filter(r => r.course_code === selectedCourse) : sorted;
+  }, [scopedRecords, selectedCourse]);
 
-  const rateColor = (r: number) => r >= 90 ? "#10b981" : r >= 75 ? "#7c3aed" : "#f59e0b";
-  const rateBg    = (r: number) => r >= 90 ? "#d1fae5" : r >= 75 ? "#faf5ff" : "#fffbeb";
-  const rateBorder= (r: number) => r >= 90 ? "#bbf7d0" : r >= 75 ? "#ede9fe" : "#fde68a";
+  const rateColor  = (r: number) => r >= 90 ? "#10b981" : r >= 75 ? "#7c3aed" : "#f59e0b";
+  const rateBg     = (r: number) => r >= 90 ? "#d1fae5" : r >= 75 ? "#faf5ff" : "#fffbeb";
+  const rateBorder = (r: number) => r >= 90 ? "#bbf7d0" : r >= 75 ? "#ede9fe" : "#fde68a";
+
+  // ── Loading state ─────────────────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20, fontFamily: "'Sora',sans-serif" }}>
+        <div className="ani0">
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px" }}>Attendance</h2>
+          <Skeleton w="30%" h={12} r={6} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "88px 1fr 1fr 1fr", gap: 14 }}>
+          {[0, 1, 2, 3].map(i => <Skeleton key={i} h={100} r={14} />)}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <Skeleton h={76} r={14} /><Skeleton h={76} r={14} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {[0, 1, 2, 3].map(i => <Skeleton key={i} h={120} r={14} />)}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Error state ───────────────────────────────────────────────────────────
+  if (isError) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 320 }}>
+        <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 20, border: "1px solid #fecaca" }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#991b1b" }}>Failed to load attendance</div>
+          <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>Check your connection and try again.</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, fontFamily: "'Sora',sans-serif" }}>
 
       {/* Page header */}
-      <div className="ani0">
-        <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px" }}>Attendance</h2>
-        <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>{overall.total} recorded sessions this term</p>
+      <div className="ani0" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px" }}>Attendance</h2>
+          <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>
+            {termView === "active"
+              ? `${overall.total} recorded sessions this term`
+              : resolvedTerm
+                ? `${overall.total} recorded sessions · ${resolvedTerm}`
+                : "Select a past term below"}
+          </p>
+        </div>
+        {/* Active / Past Terms toggle */}
+        <div style={{ display: "flex", gap: 4, background: "#faf5ff", borderRadius: 11, padding: 4, border: "1px solid #ede9fe", flexShrink: 0 }}>
+          {(["active", "past"] as const).map(view => (
+            <button
+              key={view}
+              onClick={() => { setTermView(view); setSelectedCourse(null); setSelectedTerm(null); }}
+              style={{
+                padding: "5px 12px", borderRadius: 8,
+                border: "none", cursor: "pointer",
+                fontSize: 11, fontWeight: 600,
+                fontFamily: "'Sora',sans-serif",
+                background: termView === view ? "#7c3aed" : "transparent",
+                color: termView === view ? "#fff" : "#94a3b8",
+                transition: "all .15s",
+                boxShadow: termView === view ? "0 2px 8px rgba(124,58,237,.25)" : "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {view === "active" ? "Active Term" : "Past Terms"}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* Past term selector — shown only when termView === "past" */}
+      {termView === "past" && pastTermNames.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {pastTermNames.map(name => (
+            <button
+              key={name}
+              onClick={() => { setSelectedTerm(name); setSelectedCourse(null); }}
+              style={{
+                padding: "5px 14px", borderRadius: 99,
+                border: resolvedTerm === name ? "none" : "1px solid #ede9fe",
+                background: resolvedTerm === name ? "#1e1b4b" : "#fff",
+                color: resolvedTerm === name ? "#fff" : "#64748b",
+                fontSize: 11, fontWeight: 600,
+                cursor: "pointer", fontFamily: "'Sora',sans-serif",
+                transition: "all .15s",
+                boxShadow: resolvedTerm === name ? "0 2px 8px rgba(30,27,75,.2)" : "none",
+              }}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── Hero stats row ──────────────────────────────────────────────── */}
       <div className="ani1" style={{ display: "grid", gridTemplateColumns: "88px 1fr 1fr 1fr", gap: 14 }}>
@@ -218,11 +364,11 @@ export default function Attendance() {
           <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", letterSpacing: ".8px" }}>OVERALL</div>
         </div>
 
-        {/* Stat cards */}
+        {/* Stat cards — ATTENDED uses overall.attended (PRESENT + LATE) */}
         {[
-          { label: "TOTAL",    value: overall.total,   sub: "sessions",  borderColor: "#ede9fe",   valColor: "#7c3aed"  },
-          { label: "ATTENDED", value: overall.present, sub: "present",   borderColor: "#bbf7d0",   valColor: "#10b981"  },
-          { label: "MISSED",   value: overall.absent,  sub: "absences",  borderColor: "#fecaca",   valColor: "#ef4444"  },
+          { label: "TOTAL",    value: overall.total,    sub: "sessions",  borderColor: "#ede9fe", valColor: "#7c3aed" },
+          { label: "ATTENDED", value: overall.attended, sub: "present",   borderColor: "#bbf7d0", valColor: "#10b981" },
+          { label: "MISSED",   value: overall.absent,   sub: "absences",  borderColor: "#fecaca", valColor: "#ef4444" },
         ].map(s => (
           <div key={s.label} style={{ background: "#fff", borderRadius: 14, border: `1px solid ${s.borderColor}`, padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between", boxShadow: "0 2px 10px rgba(124,58,237,.04)" }}>
             <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".8px", color: s.valColor, marginBottom: 6 }}>{s.label}</div>
@@ -238,7 +384,9 @@ export default function Attendance() {
         <div style={{ background: "linear-gradient(135deg, #7c3aed, #6d28d9)", borderRadius: 14, padding: "16px 20px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 8px 24px rgba(124,58,237,.25)" }}>
           <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(255,255,255,.18)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>🔥</div>
           <div>
-            <div style={{ fontSize: 9.5, fontWeight: 700, color: "rgba(255,255,255,.7)", letterSpacing: ".8px", marginBottom: 4 }}>CURRENT STREAK</div>
+            <div style={{ fontSize: 9.5, fontWeight: 700, color: "rgba(255,255,255,.7)", letterSpacing: ".8px", marginBottom: 4 }}>
+              {termView === "active" ? "CURRENT STREAK" : "BEST STREAK"}
+            </div>
             <div style={{ fontSize: 24, fontWeight: 700, color: "#fff", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1 }}>
               {streak} <span style={{ fontSize: 12, fontWeight: 400, opacity: .8 }}>sessions</span>
             </div>
@@ -276,14 +424,23 @@ export default function Attendance() {
         ))}
       </div>
 
-      {/* ── Course breakdown ──────────────────────────────────────────────── */}
+      {/* ── TASK 2: Course breakdown ───────────────────────────────────────── */}
       {activeTab === "overview" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {courseStats.length === 0 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 200 }}>
+              <div style={{ textAlign: "center", padding: 36, background: "#fff", borderRadius: 16, border: "1px solid #ede9fe" }}>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>📭</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#1e1b4b" }}>No attendance records yet</div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>Records will appear here once sessions are logged.</div>
+              </div>
+            </div>
+          )}
           {courseStats.map((cs, i) => {
             const warn        = cs.rate < 75;
-            const presentPct  = Math.round((cs.present / cs.total) * 100);
-            const absentPct   = Math.round((cs.absent  / cs.total) * 100);
-            const excusedPct  = Math.round((cs.excused / cs.total) * 100);
+            const presentPct  = cs.total > 0 ? Math.round((cs.present / cs.total) * 100) : 0;
+            const absentPct   = cs.total > 0 ? Math.round((cs.absent  / cs.total) * 100) : 0;
+            const excusedPct  = cs.total > 0 ? Math.round((cs.excused / cs.total) * 100) : 0;
             return (
               <div key={cs.code} style={{
                 background: "#fff", borderRadius: 14, border: "1px solid #ede9fe",
@@ -340,14 +497,16 @@ export default function Attendance() {
         </div>
       )}
 
-      {/* ── Session history ───────────────────────────────────────────────── */}
+      {/* ── TASK 3: Session history ────────────────────────────────────────── */}
       {activeTab === "history" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
-          {/* Filter pills */}
+          {/* Filter pills — dynamically built from uniqueCourses */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {[{ code: null, label: "All" }, ...courseStats.map(c => ({ code: c.code, label: c.code }))].map(item => (
-              <button key={item.label} onClick={() => setSelectedCourse(item.code === selectedCourse ? null : item.code)}
+            {[{ code: null, label: "ALL" }, ...uniqueCourses.map(c => ({ code: c.code, label: c.code }))].map(item => (
+              <button
+                key={item.label}
+                onClick={() => setSelectedCourse(item.code === selectedCourse ? null : item.code)}
                 style={{
                   padding: "4px 12px", borderRadius: 99,
                   border: selectedCourse === item.code || (item.code === null && !selectedCourse) ? "none" : "1px solid #ede9fe",
@@ -364,10 +523,14 @@ export default function Attendance() {
 
           {/* Timeline list */}
           <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #ede9fe", overflow: "hidden", boxShadow: "0 2px 10px rgba(124,58,237,.04)" }}>
+            {filteredHistory.length === 0 && (
+              <div style={{ padding: "32px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No records for this course.</div>
+            )}
             {filteredHistory.map((r, i) => {
               const statusStyles = {
                 PRESENT: { iconBg: "#d1fae5", iconColor: "#065f46" },
                 ABSENT:  { iconBg: "#fee2e2", iconColor: "#991b1b" },
+                LATE:    { iconBg: "#fef3c7", iconColor: "#92400e" },
                 EXCUSED: { iconBg: "#fef3c7", iconColor: "#92400e" },
               };
               const ss = statusStyles[r.status];
@@ -384,9 +547,9 @@ export default function Attendance() {
                 >
                   {/* Status icon circle */}
                   <div style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0, background: ss.iconBg, color: ss.iconColor, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {r.status === "PRESENT" && <IconCheck />}
-                    {r.status === "ABSENT"  && <IconX />}
-                    {r.status === "EXCUSED" && <IconMinus />}
+                    {r.status === "PRESENT"  && <IconCheck />}
+                    {r.status === "ABSENT"   && <IconX />}
+                    {(r.status === "EXCUSED" || r.status === "LATE") && <IconMinus />}
                   </div>
 
                   {/* Course info */}
@@ -398,9 +561,9 @@ export default function Attendance() {
                     <div style={{ fontSize: 11, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.course_title}</div>
                   </div>
 
-                  {/* Date + badge */}
+                  {/* Date + badge — uses created_at from API */}
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-                    <span style={{ fontSize: 10.5, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{fmtDate(r.date)}</span>
+                    <span style={{ fontSize: 10.5, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{fmtDate(r.created_at)}</span>
                     <StatusBadge status={r.status} />
                   </div>
                 </div>

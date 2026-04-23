@@ -93,10 +93,16 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    term_name = serializers.CharField(
+        source="session.course_class.term.name",
+        read_only=True,
+    )
+
     class Meta:
         model  = AttendanceRecord
         fields = [
             "id", "student", "session",
+            "term_name",
             "course_code", "course_title", "session_type",
             "week", "status",
             "created_at", "updated_at",
