@@ -20,7 +20,14 @@ from rest_framework.authtoken import views
 
 from rest_framework_simplejwt.views import TokenObtainPairView,TokenRefreshView
 
-
+from django.urls import path
+from rest_framework_simplejwt.views import TokenVerifyView
+from users.api.views import (
+    RegisterView, 
+    LogoutView, 
+    CustomTokenObtainPairView, 
+    CustomTokenRefreshView
+)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -28,7 +35,15 @@ urlpatterns = [
     path('api/users/', include('users.api.urls')),
     path('api/scheduling/', include('scheduling.api.urls')),
     path('api/records/', include('records.api.urls')),
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    
+    
+    path("api/auth/token/", CustomTokenObtainPairView.as_view(), name="token-obtain"),
+    path("api/auth/token/refresh/", CustomTokenRefreshView.as_view(), name="token-refresh"),
+    path("api/auth/token/verify/", TokenVerifyView.as_view(), name="token-verify"),
+    path("api/auth/register/", RegisterView.as_view(), name="register"),
+    path("api/auth/logout/", LogoutView.as_view(), name="logout"),
 ]
+
+
+
 
