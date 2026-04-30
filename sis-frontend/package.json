@@ -13,6 +13,7 @@
     "@tanstack/react-query": "^5.99.0",
     "autoprefixer": "^10.5.0",
     "axios": "^1.15.0",
+    "jwt-decode": "^4.0.0",
     "lucide-react": "^1.8.0",
     "postcss": "^8.5.10",
     "react": "^19.2.4",

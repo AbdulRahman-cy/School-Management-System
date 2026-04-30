@@ -349,7 +349,7 @@ function SignInForm({
   onSuccess,
 }: {
   onSwitch: () => void;
-  onSuccess: () => void;
+  onSuccess: (token: string) => void;
 }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
@@ -366,9 +366,17 @@ function SignInForm({
 
     setLoading(true);
     try {
-      await login({ email: email.trim(), password });
-      onSuccess();
+      // Capture the response from your login function
+      const response = await login({ email: email.trim(), password });
+      
+      // Pass the token to onSuccess. 
+      // Adjust `response.access` based on exactly what your `login` function returns!
+      // If `login` returns the token string directly, just use `onSuccess(response)`
+      onSuccess(response.access); 
+      
     } catch (err) {
+      // Optional: Add a console.error here temporarily to catch non-Django errors
+      // console.error("Login Error:", err); 
       setErrors(err as ParsedFieldErrors);
     } finally {
       setLoading(false);
@@ -659,8 +667,10 @@ function RegisterForm({
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
-export default function AuthPage() {
-  const [mode, setMode]       = useState<Mode>('signin');
+interface AuthPageProps {
+  onLoginSuccess: (accessToken: string) => void;
+}
+export default function AuthPage({ onLoginSuccess }: AuthPageProps) {  const [mode, setMode]       = useState<Mode>('signin');
   const [animOut, setAnimOut] = useState(false);
   const [visible, setVisible] = useState(false);
 
@@ -682,11 +692,9 @@ export default function AuthPage() {
     setTimeout(() => { setMode(next); setAnimOut(false); }, 220);
   };
 
-  const handleSuccess = () => {
-    // Notify the rest of the app that the user is now authenticated.
-    // In App.tsx: window.addEventListener('auth:login', () => navigate('/dashboard'))
-    window.dispatchEvent(new Event('auth:login'));
-  };
+  const handleSuccess = (accessToken: string) => {
+  onLoginSuccess(accessToken);
+};
 
   return (
     <>
@@ -793,8 +801,8 @@ export default function AuthPage() {
           }}>
             <IbnLogo size={52} />
             <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#1e1b4b', letterSpacing: '-0.3px' }}>
-                Ibn al-Hitham University
+              <div style={{ fontSize: 30, fontWeight: 700, color: '#1e1b4b', letterSpacing: '-0.3px' }}>
+                Ibn al-Hitham 
               </div>
               <div style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', letterSpacing: '2px', textTransform: 'uppercase', marginTop: 2 }}>
                 Student Portal
@@ -843,7 +851,7 @@ export default function AuthPage() {
             marginTop: 32, fontSize: 10, color: '#cbd5e1', textAlign: 'center',
             animation: 'fadeUp 0.5s ease 0.4s both',
           }}>
-            © 2025 Ibn al-Hitham University · All rights reserved
+            © 2026 AbdelRahman Tamer (BodaZLabZ). All rights reserved.
           </div>
         </div>
 
@@ -857,10 +865,10 @@ export default function AuthPage() {
           <div style={{ position: 'relative', animation: 'fadeUp 0.6s ease 0.3s both' }}>
             <IbnLogo size={42} inverted />
             <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.9)', marginTop: 12 }}>
-              Ibn al-Hitham University
+              Alexanderia Faculty of Engineering
             </div>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(196,181,253,0.7)', letterSpacing: '2px', textTransform: 'uppercase', marginTop: 3 }}>
-              Cairo, Egypt · Est. 1972
+              Alexanderia, Egypt · Est. 1942
             </div>
           </div>
 
@@ -908,9 +916,9 @@ export default function AuthPage() {
             animation: 'fadeUp 0.6s ease 0.5s both',
           }}>
             {[
-              { label: 'Students', value: '24,800+', icon: '🎓' },
-              { label: 'Courses',  value: '340+',    icon: '📖' },
-              { label: 'Faculty',  value: '1,200+',  icon: '👨‍🏫' },
+              { label: 'Students', value: '10,000+', icon: '🎓' },
+              { label: 'Courses',  value: '670+',    icon: '📖' },
+              { label: 'Teachers',  value: '1,000+',  icon: '👨‍🏫' },
               { label: 'Alumni',   value: '180k+',   icon: '🌍' },
             ].map(({ label, value, icon }) => (
               <div key={label} className="stat-chip">

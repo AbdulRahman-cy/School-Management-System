@@ -61,3 +61,24 @@ class RegisterSerializer(serializers.ModelSerializer):
         elif user.role == BaseUser.Role.STUDENT:
             StudentProfile.objects.create(user=user, enrollment_year=__import__('datetime').date.today().year)
         return user
+    
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        
+        # Add whatever you want into the JWT payload
+        token['role'] = user.role
+        
+        if user.role == 'STUDENT':
+            sp = StudentProfile.objects.filter(user=user).first()
+            token['profile_id'] = sp.id if sp else None
+        elif user.role == 'TEACHER':
+            tp = TeacherProfile.objects.filter(user=user).first()
+            token['profile_id'] = tp.id if tp else None
+        else:
+            token['profile_id'] = None
+            
+        return token

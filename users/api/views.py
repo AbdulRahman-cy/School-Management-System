@@ -1,5 +1,5 @@
 from rest_framework import viewsets
-from .serializers import BaseUserSerializer, TeacherProfileSerializer, StudentProfileSerializer
+from .serializers import BaseUserSerializer, CustomTokenObtainPairSerializer, TeacherProfileSerializer, StudentProfileSerializer
 from users.models import BaseUser, TeacherProfile, StudentProfile
 from .permissions import IsAdmin
 
@@ -51,7 +51,7 @@ class RegisterView(APIView):
         
         if serializer.is_valid():
             user = serializer.save()
-            refresh = RefreshToken.for_user(user)
+            refresh = CustomTokenObtainPairSerializer.get_token(user)
             
             # Note: We ONLY send the access token in the JSON body
             response = Response({
@@ -68,6 +68,8 @@ class RegisterView(APIView):
 # 2. Custom Login View
 # ---------------------------------------------------------
 class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
+
     def post(self, request, *args, **kwargs):
         response = super().post(request, *args, **kwargs)
         

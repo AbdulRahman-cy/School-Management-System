@@ -1,42 +1,42 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState, useEffect } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import UniversityPortal from './pages/Dashboard';
 import AuthPage from './pages/Authpage';
-import { getAccessToken } from './api/auth';
 
 const queryClient = new QueryClient();
 
-function App() {
-  // Access token lives in memory — on a hard refresh it's gone, so we always
-  // start unauthenticated and let the silent-refresh interceptor recover the
-  // session via the HttpOnly cookie on the first protected request.
-  const [authed, setAuthed] = useState(false);
-
-  useEffect(() => {
-    // AuthPage dispatches this after a successful login or register
-    const onLogin   = () => setAuthed(true);
-
-    // apiClient interceptor dispatches this when the refresh cookie is also
-    // expired (e.g. user was away for 7+ days)
-    const onExpired = () => {
-      setAuthed(false);
-      queryClient.clear(); // wipe any cached data from the previous session
-    };
-
-    window.addEventListener('auth:login',   onLogin);
-    window.addEventListener('auth:expired', onExpired);
-
-    return () => {
-      window.removeEventListener('auth:login',   onLogin);
-      window.removeEventListener('auth:expired', onExpired);
-    };
-  }, []);
-
+function SplashSpinner() {
   return (
-    <QueryClientProvider client={queryClient}>
-      {authed ? <UniversityPortal /> : <AuthPage />}
-    </QueryClientProvider>
+    <div style={{
+      position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', background: '#f5f3ff', gap: 20,
+    }}>
+      <svg width="48" height="48" viewBox="0 0 48 48"
+        style={{ animation: 'spin 0.9s linear infinite' }}>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="#ede9fe" strokeWidth="4" />
+        <path d="M24 4 A20 20 0 0 1 44 24" fill="none" stroke="#7c3aed"
+          strokeWidth="4" strokeLinecap="round" />
+      </svg>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
   );
 }
 
-export default App;
+function AppRoutes() {
+  // These three values drive EVERYTHING — no window events, no local useState
+  const { isAuthenticated, isLoading, handleLoginSuccess } = useAuth();
+
+  if (isLoading)      return <SplashSpinner />;
+  if (isAuthenticated) return <UniversityPortal />;
+  return <AuthPage onLoginSuccess={handleLoginSuccess} />;
+}
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </QueryClientProvider>
+  );
+}

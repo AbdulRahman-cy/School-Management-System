@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-
+import { useAuth } from '../context/AuthContext'; 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 // API response shape from GET /api/records/attendance/?student={id}&term_status=active
@@ -20,9 +20,9 @@ interface AttendanceRecord {
 
 // ─── TASK 1: Data fetching hook ───────────────────────────────────────────────
 
-const STUDENT_ID = 4;
+// ─── TASK 1: Data fetching hook ───────────────────────────────────────────────
 
-function useAttendance(studentId: number, termView: "active" | "past") {
+function useAttendance(studentId: number | null, termView: "active" | "past") {
   return useQuery<AttendanceRecord[]>({
     queryKey: ["attendance", { student: studentId, termView }],
     queryFn: async () => {
@@ -31,6 +31,7 @@ function useAttendance(studentId: number, termView: "active" | "past") {
       });
       return data;
     },
+    enabled: !!studentId, // Only fetch if we have a real student ID
     staleTime: 2 * 60 * 1000,
     retry: 1,
   });
@@ -143,13 +144,19 @@ interface CourseStat {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Attendance() {
+  // 1. Grab the dynamic studentId from your context right here!
+  const { studentId } = useAuth(); 
+
+  // 2. Your state variables
   const [activeTab,      setActiveTab]      = useState<"overview" | "history">("overview");
   const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
-  const [termView,       setTermView]        = useState<"active" | "past">("active");
-  const [selectedTerm,   setSelectedTerm]    = useState<string | null>(null);
+  const [termView,       setTermView]       = useState<"active" | "past">("active");
+  const [selectedTerm,   setSelectedTerm]   = useState<string | null>(null);
 
-  // ── TASK 1: Fetch live data ────────────────────────────────────────────────
-  const { data: records = [], isLoading, isError } = useAttendance(STUDENT_ID, termView);
+  // 3. Now this line will work perfectly because studentId is defined above
+  const { data: records = [], isLoading, isError } = useAttendance(studentId, termView);
+
+  // ... the rest of your component stays the same
 
   // ── Past term names — extracted from all past records ────────────────────
   // Used to build the term selector pills shown when termView === "past".

@@ -6,6 +6,7 @@ import CourseworkDashboard from "./CourseworkDashboard";
 import { getCourseColorTheme } from "../courseColors";
 import ExamSchedulePage from "./ExamSchedulePage";
 import GradesPage from "./GradesPage";
+import { useAuth } from '../context/AuthContext';
 
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -364,9 +365,10 @@ function GradesView({ displayGpa }: GradesViewProps) {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-const STUDENT_ID = 4;
-
 export default function UniversityPortal() {
+  const { user, studentId, logout } = useAuth();
+    const STUDENT_ID = studentId ?? 0;
+
   const [activeNav,    setActiveNav]    = useState("dashboard");
   const [collapsed,    setCollapsed]    = useState(false);
   const [cmdOpen,      setCmdOpen]      = useState(false);
@@ -554,11 +556,16 @@ export default function UniversityPortal() {
                     <div style={{ fontSize: 12.5, fontWeight: 600, color: "#1e1b4b" }}>{studentName}</div>
                     <div style={{ fontSize: 10, color: "#a78bfa" }}>{disciplineName}</div>
                   </div>
-                  {["My Profile", "Settings", "Sign Out"].map((item, i) => (
-                    <div key={i} style={{ padding: "9px 13px", fontSize: 12.5, color: item === "Sign Out" ? "#ef4444" : "#374151", cursor: "pointer", borderBottom: i < 2 ? "1px solid #fafafa" : "none" }}
+                  {[
+                    { label: "My Profile", action: () => setActiveNav("profile") },
+                    { label: "Settings",   action: () => {} },
+                    { label: "Sign Out",   action: logout },
+                  ].map((item, i) => (
+                    <div key={i} style={{ padding: "9px 13px", fontSize: 12.5, color: item.label === "Sign Out" ? "#ef4444" : "#374151", cursor: "pointer", borderBottom: i < 2 ? "1px solid #fafafa" : "none" }}
+                      onClick={() => { item.action(); setProfileOpen(false); }}
                       onMouseEnter={e => (e.currentTarget.style.background = "#faf5ff")}
                       onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                    >{item}</div>
+                    >{item.label}</div>
                   ))}
                 </div>
               )}
@@ -895,7 +902,7 @@ export default function UniversityPortal() {
 
             ) : activeNav === "attendance" ? (
               /* ── Attendance page ─────────────────────────────────────── */
-              <Attendance />
+              <Attendance studentId={STUDENT_ID} />
 
             ) : activeNav === "exams" ? (
               <ExamSchedulePage studentId={STUDENT_ID} />

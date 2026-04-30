@@ -2,8 +2,7 @@ import { useState, useMemo } from "react";
 import { useExamResults, useStudentSubmissions } from "../api";
 import type { ExamResult, StudentSubmission } from "../types";
 
-// ─── Student ID (matches rest of portal) ─────────────────────────────────────
-const STUDENT_ID = 4;
+import { useAuth } from '../context/AuthContext';
 
 // ─── Colour maps ──────────────────────────────────────────────────────────────
 
@@ -11,7 +10,7 @@ const EXAM_TYPE_STYLES: Record<string, { bg: string; color: string; label: strin
   MIDTERM:   { bg: "#ede9fe", color: "#6d28d9", label: "Midterm"   },
   FINAL:     { bg: "#dbeafe", color: "#1d4ed8", label: "Final"     },
   PRACTICAL: { bg: "#d1fae5", color: "#065f46", label: "Practical" },
-  QUIZ:      { bg: "#fef3c7", color: "#92400e", label: "Quiz"      },
+  QUIZ:      { bg: "#fef3c7", color: "#030302", label: "Quiz"      },
 };
 
 const ASSIGN_TYPE_STYLES: Record<string, { bg: string; color: string }> = {
@@ -415,6 +414,8 @@ function AssignmentGroup({ courseCode, courseTitle, items }: {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function CourseworkDashboard() {
+  const { studentId } = useAuth();
+    const STUDENT_ID = studentId ?? 0;
   const [activeTab, setActiveTab] = useState<"exams" | "assignments">("exams");
 
   const {
