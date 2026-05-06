@@ -3,24 +3,10 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Ibn al-Hitham University Portal — Authentication Page
  *
- * Architecture
- * ────────────
- *  • Token lifecycle → handled entirely in src/api/auth.ts
- *  • This component is purely presentational + form orchestration.
- *  • On success → dispatches a custom "auth:login" event; let your router
- *    (or App.tsx) listen to it and redirect to /dashboard.
- *
- * Django field mapping
- * ────────────────────
- *  Login:    POST /api/auth/token/    { email, password }
- *  Register: POST /api/auth/register/ { email, first_name, last_name, role,
- *                                       password, password2 }
- *            Role choices: "STUDENT" | "TEACHER"  (ADMIN is blocked server-side)
- *
- * Per-field error display
- * ───────────────────────
- *  Django 400 errors are parsed by parseDjangoErrors() in auth.ts into a flat
- *  { fieldName: message } map and rendered beneath each relevant input.
+ * After cookie-auth refactor:
+ *  • login()/register() return an AuthUser (via /api/auth/me/)
+ *  • This component passes the user up via onLoginSuccess
+ *  • No tokens are ever handled in JS
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -29,6 +15,7 @@ import {
   register,
   type ParsedFieldErrors,
   type UserRole,
+  type AuthUser,
 } from '../api/auth';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -201,7 +188,6 @@ function Field({ icon, type = 'text', placeholder, value, onChange, error, actio
         )}
       </div>
 
-      {/* Per-field error message */}
       {hasError && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 5,
@@ -349,7 +335,7 @@ function SignInForm({
   onSuccess,
 }: {
   onSwitch: () => void;
-  onSuccess: (token: string) => void;
+  onSuccess: (user: AuthUser) => void;
 }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
@@ -360,30 +346,20 @@ function SignInForm({
   const handleSubmit = useCallback(async () => {
     setErrors({ _general: '' });
 
-    // Client-side guard
     if (!email.trim()) { setErrors({ _general: '', email: 'Email is required.' }); return; }
     if (!password)     { setErrors({ _general: '', password: 'Password is required.' }); return; }
 
     setLoading(true);
     try {
-      // Capture the response from your login function
-      const response = await login({ email: email.trim(), password });
-      
-      // Pass the token to onSuccess. 
-      // Adjust `response.access` based on exactly what your `login` function returns!
-      // If `login` returns the token string directly, just use `onSuccess(response)`
-      onSuccess(response.access); 
-      
+      const user = await login({ email: email.trim(), password });
+      onSuccess(user);
     } catch (err) {
-      // Optional: Add a console.error here temporarily to catch non-Django errors
-      // console.error("Login Error:", err); 
       setErrors(err as ParsedFieldErrors);
     } finally {
       setLoading(false);
     }
   }, [email, password, onSuccess]);
 
-  // Allow Enter key to submit
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleSubmit();
   };
@@ -427,14 +403,12 @@ function SignInForm({
         {loading ? 'Signing in…' : 'Sign in to Portal'}
       </PrimaryButton>
 
-      {/* Divider */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ flex: 1, height: 1, background: '#ede9fe' }} />
         <span style={{ fontSize: 11, color: '#a78bfa', fontFamily: "'Sora',sans-serif" }}>or continue with</span>
         <div style={{ flex: 1, height: 1, background: '#ede9fe' }} />
       </div>
 
-      {/* Social buttons */}
       <div style={{ display: 'flex', gap: 10 }}>
         {([
           {
@@ -501,11 +475,11 @@ function RegisterForm({
   onSuccess,
 }: {
   onSwitch: () => void;
-  onSuccess: () => void;
+  onSuccess: (user: AuthUser) => void;
 }) {
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '',
-    password: '', password2: '', role: 'STUDENT' as UserRole,
+    password: '', password2: '', role: 'STUDENT' as Exclude<UserRole, 'ADMIN'>,
   });
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading]   = useState(false);
@@ -537,7 +511,6 @@ function RegisterForm({
   const handleSubmit = useCallback(async () => {
     setErrors({ _general: '' });
 
-    // Client-side guards
     const clientErrors: ParsedFieldErrors = { _general: '' };
     if (!form.firstName.trim()) clientErrors.first_name = 'First name is required.';
     if (!form.lastName.trim())  clientErrors.last_name  = 'Last name is required.';
@@ -555,7 +528,7 @@ function RegisterForm({
 
     setLoading(true);
     try {
-      await register({
+      const user = await register({
         email:      form.email.trim(),
         first_name: form.firstName.trim(),
         last_name:  form.lastName.trim(),
@@ -563,7 +536,7 @@ function RegisterForm({
         password:   form.password,
         password2:  form.password2,
       });
-      onSuccess();
+      onSuccess(user);
     } catch (err) {
       setErrors(err as ParsedFieldErrors);
     } finally {
@@ -574,7 +547,6 @@ function RegisterForm({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-      {/* Name row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <div>
           <Label>First name</Label>
@@ -611,7 +583,6 @@ function RegisterForm({
           action={{ icon: showPass ? '🙈' : '👁', onClick: () => setShowPass((s) => !s) }}
           autoComplete="new-password"
         />
-        {/* Strength meter */}
         {form.password.length > 0 && (
           <div style={{ marginTop: 7 }}>
             <div style={{ display: 'flex', gap: 4 }}>
@@ -668,9 +639,11 @@ function RegisterForm({
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 interface AuthPageProps {
-  onLoginSuccess: (accessToken: string) => void;
+  onLoginSuccess: (user: AuthUser) => void;
 }
-export default function AuthPage({ onLoginSuccess }: AuthPageProps) {  const [mode, setMode]       = useState<Mode>('signin');
+
+export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
+  const [mode, setMode]       = useState<Mode>('signin');
   const [animOut, setAnimOut] = useState(false);
   const [visible, setVisible] = useState(false);
 
@@ -679,22 +652,15 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {  const [mo
     return () => clearTimeout(t);
   }, []);
 
-  // Listen for session expiry from the apiClient interceptor
-  useEffect(() => {
-    const handler = () => setMode('signin');
-    window.addEventListener('auth:expired', handler);
-    return () => window.removeEventListener('auth:expired', handler);
-  }, []);
-
   const switchMode = (next: Mode) => {
     if (next === mode) return;
     setAnimOut(true);
     setTimeout(() => { setMode(next); setAnimOut(false); }, 220);
   };
 
-  const handleSuccess = (accessToken: string) => {
-  onLoginSuccess(accessToken);
-};
+  const handleSuccess = (user: AuthUser) => {
+    onLoginSuccess(user);
+  };
 
   return (
     <>
@@ -794,7 +760,6 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {  const [mo
         {/* ── LEFT PANEL ─────────────────────────────────────────────────── */}
         <div className="auth-left">
 
-          {/* Wordmark */}
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
             marginBottom: 32, animation: 'fadeUp 0.5s ease 0.1s both',
@@ -802,7 +767,7 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {  const [mo
             <IbnLogo size={52} />
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 30, fontWeight: 700, color: '#1e1b4b', letterSpacing: '-0.3px' }}>
-                Ibn al-Hitham 
+                Ibn al-Hitham
               </div>
               <div style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', letterSpacing: '2px', textTransform: 'uppercase', marginTop: 2 }}>
                 Student Portal
@@ -810,7 +775,6 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {  const [mo
             </div>
           </div>
 
-          {/* Form card */}
           <div style={{ width: '100%', maxWidth: 380, animation: 'fadeUp 0.5s ease 0.2s both' }}>
 
             <div className="tab-bar">
@@ -861,7 +825,6 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {  const [mo
             <PanelArt />
           </div>
 
-          {/* Branding */}
           <div style={{ position: 'relative', animation: 'fadeUp 0.6s ease 0.3s both' }}>
             <IbnLogo size={42} inverted />
             <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.9)', marginTop: 12 }}>
@@ -872,7 +835,6 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {  const [mo
             </div>
           </div>
 
-          {/* Headline + info card */}
           <div style={{ position: 'relative', animation: 'fadeUp 0.6s ease 0.4s both' }}>
             <h2 style={{
               fontSize: 32, fontWeight: 700, color: '#fff',
@@ -909,7 +871,6 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {  const [mo
             </div>
           </div>
 
-          {/* Stats */}
           <div style={{
             position: 'relative',
             display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12,
@@ -918,7 +879,7 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {  const [mo
             {[
               { label: 'Students', value: '10,000+', icon: '🎓' },
               { label: 'Courses',  value: '670+',    icon: '📖' },
-              { label: 'Teachers',  value: '1,000+',  icon: '👨‍🏫' },
+              { label: 'Teachers', value: '1,000+',  icon: '👨‍🏫' },
               { label: 'Alumni',   value: '180k+',   icon: '🌍' },
             ].map(({ label, value, icon }) => (
               <div key={label} className="stat-chip">

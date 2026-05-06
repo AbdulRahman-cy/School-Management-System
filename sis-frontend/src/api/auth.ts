@@ -1,12 +1,17 @@
 /**
- * src/api/auth.ts  (updated)
+ * src/api/auth.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Changes from previous version
- * ──────────────────────────────
- *  + setLogoutHandler() — AuthContext injects its logout fn here after mount
- *                         so the interceptor can call it without a circular import.
- *  + Interceptor now calls _logoutHandler() instead of dispatching window events.
- *  + login() / register() return the raw access token; AuthContext decodes it.
+ * Cookie-based JWT auth.
+ *
+ * Token storage
+ * ─────────────
+ *   access_token  → HttpOnly cookie  (JS cannot read or touch)
+ *   refresh_token → HttpOnly cookie  (path-scoped to /api/auth/)
+ *
+ * The frontend NEVER sees either token. It can only:
+ *   - call /api/auth/me/ to ask "am I logged in?"
+ *   - rely on the browser to attach cookies automatically
+ *   - listen for 401s and silently refresh
  */
 
 import axios from 'axios';
@@ -14,7 +19,17 @@ import type { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axio
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-export type UserRole = 'STUDENT' | 'TEACHER';
+export type UserRole = 'STUDENT' | 'TEACHER' | 'ADMIN';
+
+/** Shape returned by GET /api/auth/me/ — also returned by login() and register(). */
+export interface AuthUser {
+  id:         number;
+  email:      string;
+  first_name: string;
+  last_name:  string;
+  role:       UserRole;
+  profile_id: number | null;
+}
 
 export interface LoginPayload {
   email:    string;
@@ -25,14 +40,9 @@ export interface RegisterPayload {
   email:      string;
   first_name: string;
   last_name:  string;
-  role:       UserRole;
+  role:       Exclude<UserRole, 'ADMIN'>;
   password:   string;
   password2:  string;
-}
-
-export interface AuthResponse {
-  access:   string;
-  message?: string;
 }
 
 export type DjangoFieldErrors = Record<string, string | string[]>;
@@ -42,17 +52,7 @@ export interface ParsedFieldErrors {
   _general: string;
 }
 
-// ─── In-Memory Token Store ─────────────────────────────────────────────────────
-
-let _accessToken: string | null = null;
-
-export const getAccessToken   = ()          => _accessToken;
-export const setAccessToken   = (t: string) => { _accessToken = t; };
-export const clearAccessToken = ()          => { _accessToken = null; };
-
-// ─── Logout Handler Injection ──────────────────────────────────────────────────
-// AuthContext calls setLogoutHandler(logout) after it mounts.
-// This avoids a circular import: auth.ts ← AuthContext ← auth.ts.
+// ─── Logout Handler Injection (avoids circular import with AuthContext) ──────
 
 let _logoutHandler: (() => void) | null = null;
 export const setLogoutHandler = (fn: () => void) => { _logoutHandler = fn; };
@@ -75,8 +75,8 @@ export function parseDjangoErrors(data: DjangoFieldErrors): ParsedFieldErrors {
 // ─── Axios Instances ───────────────────────────────────────────────────────────
 
 /**
- * authApi — bare instance for /api/auth/* only.
- * No interceptors: a 401 during a refresh call must NOT trigger another refresh.
+ * authApi — for /api/auth/* lifecycle endpoints only.
+ * No interceptors: a 401 during refresh must NOT trigger another refresh.
  */
 const authApi: AxiosInstance = axios.create({
   baseURL:         '/api/auth',
@@ -85,8 +85,8 @@ const authApi: AxiosInstance = axios.create({
 });
 
 /**
- * apiClient — use this everywhere else in the app.
- * Automatically attaches Bearer token and silently refreshes on 401.
+ * apiClient — used everywhere else.
+ * Cookies are attached by the browser; no Authorization header needed.
  */
 export const apiClient: AxiosInstance = axios.create({
   baseURL:         '/api',
@@ -94,49 +94,31 @@ export const apiClient: AxiosInstance = axios.create({
   headers:         { 'Content-Type': 'application/json' },
 });
 
-// ─── Request Interceptor ───────────────────────────────────────────────────────
-
-apiClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    const token = getAccessToken();
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  },
-  (error) => Promise.reject(error),
-);
-
 // ─── Response Interceptor — Silent Refresh ─────────────────────────────────────
 
-let _refreshing: Promise<string> | null = null;
+let _refreshing: Promise<void> | null = null;
 
 apiClient.interceptors.response.use(
   (res) => res,
   async (error: AxiosError) => {
     const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    if (error.response?.status !== 401 || original._retry) {
+    if (error.response?.status !== 401 || !original || original._retry) {
       return Promise.reject(error);
     }
-
     original._retry = true;
 
     try {
       if (!_refreshing) {
-        _refreshing = authApi
-          .post<AuthResponse>('/token/refresh/', {})
-          .then((res) => {
-            setAccessToken(res.data.access);
-            return res.data.access;
-          })
+        _refreshing = authApi.post('/token/refresh/', {})
+          .then(() => undefined)
           .finally(() => { _refreshing = null; });
       }
-
-      const newToken = await _refreshing;
-      original.headers.Authorization = `Bearer ${newToken}`;
+      await _refreshing;
+      // Cookie has been refreshed by the server — just retry the original request
       return apiClient(original);
-
     } catch {
-      _logoutHandler?.();       // tell AuthContext → setUser(null) → show login
+      _logoutHandler?.();
       return Promise.reject(error);
     }
   },
@@ -144,24 +126,42 @@ apiClient.interceptors.response.use(
 
 // ─── Auth API Functions ────────────────────────────────────────────────────────
 
-export async function login(payload: LoginPayload): Promise<AuthResponse> {
+export async function login(payload: LoginPayload): Promise<AuthUser> {
   try {
-    const { data } = await authApi.post<AuthResponse>('/token/', payload);
-    setAccessToken(data.access);
-    return data;
+    await authApi.post('/token/', payload);   // sets cookies
+    return await me();                         // fetch user info
   } catch (err) {
     const e = err as AxiosError<DjangoFieldErrors>;
     throw parseDjangoErrors(e.response?.data ?? { detail: 'Login failed.' });
   }
 }
 
-export async function register(payload: RegisterPayload): Promise<AuthResponse> {
+export async function register(payload: RegisterPayload): Promise<AuthUser> {
   try {
-    const { data } = await authApi.post<AuthResponse>('/register/', payload);
-    setAccessToken(data.access);
-    return data;
+    await authApi.post('/register/', payload);
+    return await me();
   } catch (err) {
     const e = err as AxiosError<DjangoFieldErrors>;
     throw parseDjangoErrors(e.response?.data ?? { detail: 'Registration failed.' });
   }
+}
+
+export async function logout(): Promise<void> {
+  try { await authApi.post('/logout/', {}); }
+  catch { /* swallow — cookies are gone client-side anyway */ }
+}
+
+/**
+ * me() — source of truth for "who is logged in".
+ * Uses apiClient so silent refresh kicks in automatically if the access token
+ * expired but the refresh token is still valid.
+ */
+export async function me(): Promise<AuthUser> {
+  const { data } = await apiClient.get<AuthUser>('/auth/me/');
+  return data;
+}
+
+/** Call on app mount to bootstrap auth state. Returns null if no valid session. */
+export async function tryRestoreSession(): Promise<AuthUser | null> {
+  try { return await me(); } catch { return null; }
 }

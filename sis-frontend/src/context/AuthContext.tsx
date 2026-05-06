@@ -1,31 +1,28 @@
+/**
+ * src/context/AuthContext.tsx
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Cookie-based auth context.
+ *
+ * No more JWT decoding on the client — the token is in an HttpOnly cookie that
+ * JS cannot read. User identity comes from GET /api/auth/me/ instead.
+ */
+
 import {
   createContext, useContext, useState, useEffect, useCallback,
   type ReactNode,
 } from 'react';
-import { jwtDecode } from 'jwt-decode';
-import axios from 'axios';
-import { setAccessToken, clearAccessToken, setLogoutHandler, apiClient } from '../api/auth';
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
+import {
+  setLogoutHandler,
+  tryRestoreSession,
+  logout as apiLogout,
+  type AuthUser,
+} from '../api/auth';
 
-interface DjangoJwtPayload {
-  user_id:    number;
-  role:       'STUDENT' | 'TEACHER' | 'ADMIN';
-  profile_id: number | null;   // ← StudentProfile.id or TeacherProfile.id
-  email:      string;
-  exp:        number;
-  iat:        number;
-  jti:        string;
-  token_type: string;
-}
+// Re-export so consumers don't need to import from two places
+export type { AuthUser };
 
-export interface AuthUser {
-  userId:    number;
-  email:     string;
-  role:      'STUDENT' | 'TEACHER' | 'ADMIN';
-  studentId: number | null;
-  teacherId: number | null;
-}
+// ─── Context Value ────────────────────────────────────────────────────────────
 
 export interface AuthContextValue {
   user:               AuthUser | null;
@@ -33,26 +30,11 @@ export interface AuthContextValue {
   isAuthenticated:    boolean;
   studentId:          number | null;
   teacherId:          number | null;
-  handleLoginSuccess: (accessToken: string) => void;  // no longer async
-  logout:             () => void;
+  handleLoginSuccess: (user: AuthUser) => void;
+  logout:             () => Promise<void>;
 }
-
-// ─── Context ───────────────────────────────────────────────────────────────────
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-// ─── Helper ────────────────────────────────────────────────────────────────────
-
-function decodeUser(token: string): AuthUser {
-  const c = jwtDecode<DjangoJwtPayload>(token);
-  return {
-    userId:    c.user_id,
-    email:     c.email,
-    role:      c.role,
-    studentId: c.role === 'STUDENT' ? c.profile_id : null,
-    teacherId: c.role === 'TEACHER' ? c.profile_id : null,
-  };
-}
 
 // ─── Provider ──────────────────────────────────────────────────────────────────
 
@@ -60,48 +42,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user,      setUser]    = useState<AuthUser | null>(null);
   const [isLoading, setLoading] = useState(true);
 
-  const logout = useCallback(() => {
-    apiClient.post('/auth/logout/').catch(() => {});
-    clearAccessToken();
+  const handleLoginSuccess = useCallback((u: AuthUser) => {
+    setUser(u);
+  }, []);
+
+  const logout = useCallback(async () => {
+    await apiLogout();   // clears cookies server-side + blacklists refresh
     setUser(null);
   }, []);
 
-  // No more /me/ call — everything comes from the token itself
-  const handleLoginSuccess = useCallback((accessToken: string) => {
-  console.log('✅ handleLoginSuccess fired');
-  setAccessToken(accessToken);
-  
-  const decoded = decodeUser(accessToken);
-  console.log('decoded:', decoded);   // ← add this
-  setUser(decoded);
-}, []);
+  // Wire the apiClient interceptor's "refresh failed → log out" hook
+  useEffect(() => { setLogoutHandler(() => setUser(null)); }, []);
 
-  useEffect(() => { setLogoutHandler(logout); }, [logout]);
-
-  // Silent refresh on mount
+  // Bootstrap: ask the server who we are. If the access cookie is expired
+  // but the refresh cookie is still valid, the apiClient interceptor will
+  // silently refresh and retry — we just await the answer.
   useEffect(() => {
     let cancelled = false;
 
-    axios
-      .post<{ access: string }>('/api/auth/token/refresh/', {}, { withCredentials: true })
-      .then(({ data }) => {
-        if (!cancelled) handleLoginSuccess(data.access);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    tryRestoreSession()
+      .then((u) => { if (!cancelled) setUser(u); })
+      .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [handleLoginSuccess]);
+  }, []);
+
+  // Derived role-specific ids — kept for backward compatibility
+  const studentId = user?.role === 'STUDENT' ? user.profile_id : null;
+  const teacherId = user?.role === 'TEACHER' ? user.profile_id : null;
 
   return (
     <AuthContext.Provider value={{
       user,
       isLoading,
       isAuthenticated: user !== null,
-      studentId:       user?.studentId ?? null,
-      teacherId:       user?.teacherId ?? null,
+      studentId,
+      teacherId,
       handleLoginSuccess,
       logout,
     }}>

@@ -23,10 +23,9 @@ function SplashSpinner() {
 }
 
 function AppRoutes() {
-  // These three values drive EVERYTHING — no window events, no local useState
   const { isAuthenticated, isLoading, handleLoginSuccess } = useAuth();
 
-  if (isLoading)      return <SplashSpinner />;
+  if (isLoading)       return <SplashSpinner />;
   if (isAuthenticated) return <UniversityPortal />;
   return <AuthPage onLoginSuccess={handleLoginSuccess} />;
 }
