@@ -1,23 +1,8 @@
 import statistics
 from rest_framework import serializers
 from academics.api.serializers import CourseClassSerializer
-from records.models import (
-    Enrollment, GradeEntry, AttendanceRecord,
-    Exam, ExamResult, Assignment, StudentSubmission,
-)
+from records.models import Enrollment
 
-
-# ─────────────────────────────────────────────────────────────
-# GradeEntry
-# ─────────────────────────────────────────────────────────────
-
-class GradeEntrySerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = GradeEntry
-        fields = [
-            "id", "enrollment", "component", "score",
-            "created_at", "updated_at",
-        ]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -26,7 +11,7 @@ class GradeEntrySerializer(serializers.ModelSerializer):
 
 class EnrollmentSerializer(serializers.ModelSerializer):
     course_class        = CourseClassSerializer(read_only=True)
-    grades              = GradeEntrySerializer(many=True, read_only=True)
+    # 🚨 'grades' field removed here 🚨
     final_percentage    = serializers.ReadOnlyField()
     course_grade_points = serializers.ReadOnlyField()
     cohort_stats        = serializers.SerializerMethodField()
@@ -36,7 +21,8 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         fields = [
             "id", "student", "course_class",
             "lecture_session", "tutorial_session", "lab_session",
-            "grades", "final_percentage", "course_grade_points",
+            # 🚨 'grades' removed from this list 🚨
+            "final_percentage", "course_grade_points",
             "cohort_stats",
             "created_at", "updated_at",
         ]
@@ -44,12 +30,12 @@ class EnrollmentSerializer(serializers.ModelSerializer):
     def get_cohort_stats(self, obj):
         peer_enrollments = Enrollment.objects.filter(
             course_class=obj.course_class,
-        ).prefetch_related("grades")
+        ) # 🚨 REMOVED .prefetch_related('grades') 🚨
 
         percentages = [
             float(peer.final_percentage)
             for peer in peer_enrollments
-            if peer.grades.exists()
+            if not peer.is_pending # 🚨 CHANGED: We now check your dynamic property instead of the old table!
         ]
 
         if not percentages:
@@ -73,153 +59,3 @@ class EnrollmentSerializer(serializers.ModelSerializer):
                 "F":  len([p for p in percentages if p < 60]),
             },
         }
-
-
-# ─────────────────────────────────────────────────────────────
-# AttendanceRecord
-# ─────────────────────────────────────────────────────────────
-
-class AttendanceRecordSerializer(serializers.ModelSerializer):
-    course_code  = serializers.CharField(
-        source="session.course_class.course.code",
-        read_only=True,
-    )
-    course_title = serializers.CharField(
-        source="session.course_class.course.title",
-        read_only=True,
-    )
-    session_type = serializers.CharField(
-        source="session.session_type",
-        read_only=True,
-    )
-
-    term_name = serializers.CharField(
-        source="session.course_class.term.name",
-        read_only=True,
-    )
-
-    class Meta:
-        model  = AttendanceRecord
-        fields = [
-            "id", "student", "session",
-            "term_name",
-            "course_code", "course_title", "session_type",
-            "week", "status",
-            "created_at", "updated_at",
-        ]
-        read_only_fields = ["created_at", "updated_at"]
-
-
-# ─────────────────────────────────────────────────────────────
-# Exam
-# ─────────────────────────────────────────────────────────────
-
-class ExamSerializer(serializers.ModelSerializer):
-    course_code  = serializers.CharField(
-        source="course_class.course.code",
-        read_only=True,
-    )
-    course_title = serializers.CharField(
-        source="course_class.course.title",
-        read_only=True,
-    )
-
-    class Meta:
-        model  = Exam
-        fields = [
-            "id", "course_class", "course_code", "course_title",
-            "exam_type", "week", "max_score",
-            "created_at", "updated_at",
-        ]
-
-
-# ─────────────────────────────────────────────────────────────
-# ExamResult
-# ─────────────────────────────────────────────────────────────
-
-class ExamResultSerializer(serializers.ModelSerializer):
-    exam_type  = serializers.CharField(source="exam.exam_type",  read_only=True)
-    exam_week  = serializers.IntegerField(source="exam.week",    read_only=True)
-    max_score  = serializers.DecimalField(
-        source="exam.max_score",
-        max_digits=5, decimal_places=2,
-        read_only=True,
-    )
-    course_code  = serializers.CharField(
-        source="exam.course_class.course.code",
-        read_only=True,
-    )
-    course_title = serializers.CharField(
-        source="exam.course_class.course.title",
-        read_only=True,
-    )
-
-    class Meta:
-        model  = ExamResult
-        fields = [
-            "id", "exam", "student",
-            "course_code", "course_title",
-            "exam_type", "exam_week", "max_score",
-            "status", "score",
-            "created_at", "updated_at",
-        ]
-
-
-# ─────────────────────────────────────────────────────────────
-# Assignment
-# ─────────────────────────────────────────────────────────────
-
-class AssignmentSerializer(serializers.ModelSerializer):
-    course_code  = serializers.CharField(
-        source="course_class.course.code",
-        read_only=True,
-    )
-    course_title = serializers.CharField(
-        source="course_class.course.title",
-        read_only=True,
-    )
-
-    class Meta:
-        model  = Assignment
-        fields = [
-            "id", "course_class", "course_code", "course_title",
-            "assignment_type", "due_week", "max_points",
-            "created_at", "updated_at",
-        ]
-
-
-# ─────────────────────────────────────────────────────────────
-# StudentSubmission
-# ─────────────────────────────────────────────────────────────
-
-class StudentSubmissionSerializer(serializers.ModelSerializer):
-    is_late      = serializers.ReadOnlyField()
-    assignment_type = serializers.CharField(
-        source="assignment.assignment_type",
-        read_only=True,
-    )
-    due_week     = serializers.IntegerField(source="assignment.due_week", read_only=True)
-    max_points   = serializers.DecimalField(
-        source="assignment.max_points",
-        max_digits=5, decimal_places=2,
-        read_only=True,
-    )
-    course_code  = serializers.CharField(
-        source="assignment.course_class.course.code",
-        read_only=True,
-    )
-    course_title = serializers.CharField(
-        source="assignment.course_class.course.title",
-        read_only=True,
-    )
-
-    class Meta:
-        model  = StudentSubmission
-        fields = [
-            "id", "student", "assignment",
-            "course_code", "course_title",
-            "assignment_type", "due_week", "max_points",
-            "score", "submitted_at", "is_late",
-            "created_at", "updated_at",
-        ]
-        read_only_fields = ["submitted_at", "created_at", "updated_at"]
