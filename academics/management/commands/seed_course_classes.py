@@ -193,7 +193,8 @@ class Command(BaseCommand):
             missing_courses = set()
 
             for group in groups:
-                disc_code = group.discipline.code
+                # FIX: Strip the _GSP suffix so it matches the blueprint dict keys exactly
+                disc_code = group.discipline.code.replace("_GSP", "")
                 year = group.year_level
 
                 blueprint = CURRICULUM_BLUEPRINT.get(disc_code)
@@ -208,9 +209,9 @@ class Command(BaseCommand):
                         missing_courses.add(course_code)
                         continue
 
+                    # FIX: Removed term=term. It is now derived entirely from the group.
                     _, created = CourseClass.objects.get_or_create(
                         course=course,
-                        term=term,
                         group=group,
                     )
                     if created:

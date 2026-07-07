@@ -33,27 +33,27 @@ class Command(BaseCommand):
         for term in terms:
             self.stdout.write(f"\nProcessing enrollments for: {term.name}")
             
-            if not Session.objects.filter(course_class__term=term).exists():
+            # FIX: course_class__group__term
+            if not Session.objects.filter(course_class__group__term=term).exists():
                 self.stdout.write(self.style.WARNING(f"Skipping {term.name} - no sessions found. Run scheduler first."))
                 continue
 
             sessions_map: dict[int, dict[str, Session]] = {}
-            for s in Session.objects.filter(course_class__term=term):
+            for s in Session.objects.filter(course_class__group__term=term):
                 sessions_map.setdefault(s.course_class_id, {})[s.session_type] = s
 
             classes_by_group: dict[int, list] = {}
-            for cc in CourseClass.objects.filter(term=term):
+            # FIX: group__term
+            for cc in CourseClass.objects.filter(group__term=term):
                 classes_by_group.setdefault(cc.group_id, []).append(cc)
 
             to_create = []
             for student in students:
                 calculated_year = term.start_date.year - student.enrollment_year + 1
                 
-                # Student hadn't enrolled yet in this historical term
                 if calculated_year < 1:
                     continue
                 
-                # Cap at year 4 for standard enrollment tracking
                 year_level = min(4, calculated_year)
 
                 group = StudyGroup.objects.filter(

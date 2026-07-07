@@ -10,8 +10,8 @@ from scheduling.models import Session
 
 
 STUDENT_ID   = 4
-CURRENT_WEEK = 5    # active term: only generate up to this week
-TOTAL_WEEKS  = 15   # past terms: full semester length
+CURRENT_WEEK = 5    
+TOTAL_WEEKS  = 15   
 
 NORMAL_WEIGHTS = {
     "PRESENT": 75,
@@ -40,7 +40,6 @@ class Command(BaseCommand):
     )
 
     def handle(self, *args, **options):
-        # ── 1. Fetch the student ──────────────────────────────────────────────
         try:
             student = StudentProfile.objects.get(id=STUDENT_ID)
         except StudentProfile.DoesNotExist:
@@ -52,9 +51,6 @@ class Command(BaseCommand):
         active_term_count = 0
         past_term_count   = 0
 
-        # ═════════════════════════════════════════════════════════════════════
-        # SECTION A — ACTIVE TERM
-        # ═════════════════════════════════════════════════════════════════════
         self.stdout.write(self.style.HTTP_INFO("── Active Term ──────────────────────────────"))
 
         try:
@@ -66,9 +62,10 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Term: {active_term}")
 
+        # FIX: course_class__group__term
         active_class_ids = list(
             Enrollment.objects
-            .filter(student=student, course_class__term=active_term)
+            .filter(student=student, course_class__group__term=active_term)
             .values_list("course_class_id", flat=True)
         )
 
@@ -77,14 +74,13 @@ class Command(BaseCommand):
         else:
             self.stdout.write(f"Enrolled in {len(active_class_ids)} course class(es).")
 
-            # Delete stale active-term records
+            # FIX: session__course_class__group__term
             deleted, _ = AttendanceRecord.objects.filter(
                 student=student,
-                session__course_class__term=active_term,
+                session__course_class__group__term=active_term,
             ).delete()
             self.stdout.write(f"Deleted {deleted} stale active-term record(s).")
 
-            # Pick the AT-RISK class
             at_risk_class_id = random.choice(active_class_ids)
             self.stdout.write(f"At-risk class id: {at_risk_class_id}")
 
@@ -117,14 +113,12 @@ class Command(BaseCommand):
                         )
                         active_term_count += 1
 
-        # ═════════════════════════════════════════════════════════════════════
-        # SECTION B — PAST TERMS
-        # ═════════════════════════════════════════════════════════════════════
         self.stdout.write(self.style.HTTP_INFO("\n── Past Terms ───────────────────────────────"))
 
+        # FIX: course_class__group__term__is_active
         past_class_ids = list(
             Enrollment.objects
-            .filter(student=student, course_class__term__is_active=False)
+            .filter(student=student, course_class__group__term__is_active=False)
             .values_list("course_class_id", flat=True)
         )
 
@@ -133,10 +127,10 @@ class Command(BaseCommand):
         else:
             self.stdout.write(f"Found {len(past_class_ids)} past course class(es).")
 
-            # Delete stale past-term records
+            # FIX: session__course_class__group__term__is_active
             deleted, _ = AttendanceRecord.objects.filter(
                 student=student,
-                session__course_class__term__is_active=False,
+                session__course_class__group__term__is_active=False,
             ).delete()
             self.stdout.write(f"Deleted {deleted} stale past-term record(s).")
 
@@ -165,9 +159,6 @@ class Command(BaseCommand):
                         )
                         past_term_count += 1
 
-        # ═════════════════════════════════════════════════════════════════════
-        # SECTION C — SINGLE BULK INSERT
-        # ═════════════════════════════════════════════════════════════════════
         if not records_to_create:
             self.stdout.write(self.style.WARNING("\nNothing to insert. Exiting."))
             return

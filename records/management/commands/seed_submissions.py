@@ -26,15 +26,17 @@ class Command(BaseCommand):
             self.stdout.write(f"\nProcessing submissions for: {term.name}")
             
             assignment_map: dict[int, list[Assignment]] = {}
-            for assignment in Assignment.objects.filter(course_class__term=term):
+            # FIX: course_class__group__term
+            for assignment in Assignment.objects.filter(course_class__group__term=term):
                 assignment_map.setdefault(assignment.course_class_id, []).append(assignment)
 
             if not assignment_map:
                 self.stdout.write(self.style.WARNING(f"No assignments found for {term.name}."))
                 continue
 
+            # FIX: course_class__group__term
             enrollments = Enrollment.objects.filter(
-                course_class__term=term
+                course_class__group__term=term
             ).select_related("student", "course_class")
 
             to_create = []
@@ -52,7 +54,6 @@ class Command(BaseCommand):
                     else:
                         submitted_at = deadline - timedelta(days=random.randint(0, 3))
 
-                    # If term is active, leave score as None
                     if term.is_active:
                         raw_score = None
                     else:
@@ -73,7 +74,8 @@ class Command(BaseCommand):
             if to_create:
                 self._flush(to_create)
 
-            count = StudentSubmission.objects.filter(assignment__course_class__term=term).count()
+            # FIX: assignment__course_class__group__term
+            count = StudentSubmission.objects.filter(assignment__course_class__group__term=term).count()
             self.stdout.write(self.style.SUCCESS(f"Seeded {count} submissions for {term.name}."))
 
     def _flush(self, batch: list[StudentSubmission]) -> None:

@@ -39,16 +39,15 @@ class Discipline(TimestampedModel):
     code         = models.CharField(max_length=20, unique=True)
     name         = models.CharField(max_length=200)
     program_type = models.CharField(max_length=10, choices=ProgramType.choices)
-    department   = models.ForeignKey(
+    department   = models.OneToOneField(
         Department,
         on_delete=models.PROTECT,
-        related_name="disciplines",
+        related_name="discipline",
     )
 
     def __str__(self):
+        
         return f"{self.code} ({self.program_type})"
-
-
 # ─────────────────────────────────────────────────────────────
 # Term
 # ─────────────────────────────────────────────────────────────
@@ -172,11 +171,7 @@ class CourseClass(TimestampedModel):
         on_delete=models.PROTECT,
         related_name="classes",
     )
-    term        = models.ForeignKey(
-        Term,
-        on_delete=models.PROTECT,
-        related_name="classes",
-    )
+    
     group       = models.ForeignKey(
         StudyGroup,
         on_delete=models.PROTECT,
@@ -192,19 +187,12 @@ class CourseClass(TimestampedModel):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["course", "term", "group"],
-                name="unique_course_term_group",
+                fields=["course", "group"],
+                name="unique_course_group",
             )
         ]
 
-    def clean(self):
-        # group must belong to the same term as the class
-        if self.group_id and self.term_id:
-            if self.group.term_id != self.term_id:
-                raise ValidationError(
-                    "The study group's term must match the course class term."
-                )
-
+    
     def __str__(self):
         return f"{self.course.code} / {self.group}"
     

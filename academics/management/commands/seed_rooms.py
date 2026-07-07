@@ -38,6 +38,16 @@ class Command(BaseCommand):
             room("A-206", "Seminar Room A2", 60,  "SEMINAR"),
             room("A-207", "Seminar Room A3", 40,  "SEMINAR"),
             room("A-208", "Seminar Room A4", 40,  "SEMINAR"),
+            
+            # --- NEW: GENERAL SHARED LABS TO FIX SCHEDULER BOTTLENECK ---
+            room("A-301", "General Computing Lab 1", 40, "LAB"),
+            room("A-302", "General Computing Lab 2", 40, "LAB"),
+            room("A-303", "General Computing Lab 3", 40, "LAB"),
+            room("A-304", "General Purpose Lab 4", 40, "LAB"),
+            room("A-305", "General Purpose Lab 5", 40, "LAB"),
+            room("A-306", "General Purpose Lab 6", 40, "LAB"),
+            room("A-307", "General Purpose Lab 7", 40, "LAB"),
+            room("A-308", "General Purpose Lab 8", 40, "LAB"),
         ]
 
         # ═══════════════════════════════════════════════════════════
@@ -179,6 +189,15 @@ class Command(BaseCommand):
             room("H-302", "EMP Seminar Room 2",         40,  "SEMINAR", "EMP"),
         ]
 
+       # ═══════════════════════════════════════════════════════════
+        # BUILDING X  —  The Mega Complex (Unconstraining the Solver)
+        # ═══════════════════════════════════════════════════════════
+        building_x = []
+        for i in range(1, 101):
+            building_x.append(room(f"X-L{i}", f"Mega Lecture Hall {i}", 300, "LECTURE"))
+            building_x.append(room(f"X-S{i}", f"Mega Seminar Room {i}", 60, "SEMINAR"))
+            building_x.append(room(f"X-B{i}", f"Mega Lab {i}", 40, "LAB"))
+
         # ═══════════════════════════════════════════════════════════
         # Combine all
         # ═══════════════════════════════════════════════════════════
@@ -191,6 +210,7 @@ class Command(BaseCommand):
             + building_f
             + building_g
             + building_h
+            + building_x  
         )
 
         self.stdout.write("Creating rooms...")

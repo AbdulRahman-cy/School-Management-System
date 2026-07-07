@@ -24,15 +24,17 @@ class Command(BaseCommand):
             self.stdout.write(f"\nProcessing exam results for: {term.name}")
             
             exam_map: dict[int, dict[str, Exam]] = {}
-            for exam in Exam.objects.filter(course_class__term=term):
+            # FIX: course_class__group__term
+            for exam in Exam.objects.filter(course_class__group__term=term):
                 exam_map.setdefault(exam.course_class_id, {})[exam.exam_type] = exam
 
             if not exam_map:
                 self.stdout.write(self.style.WARNING(f"No Exams found for {term.name}."))
                 continue
 
+            # FIX: course_class__group__term
             enrollments = Enrollment.objects.filter(
-                course_class__term=term
+                course_class__group__term=term
             ).select_related("student", "course_class")
 
             types_to_seed = [Exam.ExamType.MIDTERM]

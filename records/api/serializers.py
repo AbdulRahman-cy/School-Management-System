@@ -94,7 +94,7 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
     )
 
     term_name = serializers.CharField(
-        source="session.course_class.term.name",
+        source="session.course_class.group.term.name",
         read_only=True,
     )
 

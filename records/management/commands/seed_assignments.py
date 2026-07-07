@@ -21,7 +21,8 @@ class Command(BaseCommand):
         batch_size = options["batch_size"]
 
         for term in Term.objects.all():
-            course_classes = CourseClass.objects.filter(term=term)
+            # FIX: group__term
+            course_classes = CourseClass.objects.filter(group__term=term)
             if not course_classes.exists():
                 self.stdout.write(self.style.WARNING(f"No CourseClasses found for {term.name}."))
                 continue

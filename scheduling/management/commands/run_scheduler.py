@@ -43,12 +43,12 @@ class Command(BaseCommand):
         for term in terms:
             self.stdout.write(self.style.WARNING(f"\n=== Scheduling term: {term.name} ==="))
             
-            course_classes = list(CourseClass.objects.filter(term=term).select_related("course", "group__discipline__department"))
+            # FIX: filter(group__term=term)
+            course_classes = list(CourseClass.objects.filter(group__term=term).select_related("course", "group__discipline__department"))
             if not course_classes:
                 self.stdout.write(self.style.WARNING(f"Skipping {term.name} - no CourseClasses found."))
                 continue
 
-            # ── 1. FLATTEN REQUIREMENTS DYNAMICALLY ──
             requirements = []
             for cc_idx, cc in enumerate(course_classes):
                 course = cc.course
@@ -137,7 +137,8 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def _save(self, assignments, term):
-        Session.objects.filter(course_class__term=term).delete()
+        # FIX: filter(course_class__group__term=term)
+        Session.objects.filter(course_class__group__term=term).delete()
         sessions = [Session(course_class=cc, session_type=stype, timeslot=ts, room=room) for cc, stype, ts, room in assignments]
         Session.objects.bulk_create(sessions)
         self.stdout.write(self.style.SUCCESS(f"Saved {len(sessions)} Dynamic Sessions for {term.name}!"))

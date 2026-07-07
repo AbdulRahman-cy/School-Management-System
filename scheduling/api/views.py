@@ -26,7 +26,7 @@ class ScheduleSessionViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         # 1. Filter for the active term
         queryset = Session.objects.filter(
-            course_class__term__is_active=True
+            course_class__group__term__is_active=True
         ).select_related('room', 'timeslot', 'course_class__course')
         
         # 2. Filter for the specific student 

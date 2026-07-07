@@ -958,6 +958,36 @@ class Command(BaseCommand):
             {"code": "RSA 4E3", "title": "Elective-7", "credits": 3, "course_type": "ELECTIVE"},
             {"code": "RSA 4E4", "title": "Elective-8", "credits": 3, "course_type": "ELECTIVE"},
             {"code": "RSA 4E5", "title": "Elective-9", "credits": 3, "course_type": "ELECTIVE"},
+
+            # ─── Exact Matches from Faculty Documents ───────────────────
+            {"code": "EMP 111", "title": "Mathematics 1", "credits": 3},
+            {"code": "EMP 131", "title": "Physics 1", "credits": 3},
+            {"code": "EMP 121", "title": "Statics", "credits": 3},
+            {"code": "EMP x12", "title": "Linear Algebra", "credits": 3},
+            {"code": "EMP x13", "title": "Multivariable Calculus", "credits": 3},
+            {"code": "EMP x14", "title": "Differential Equations", "credits": 3},
+            {"code": "EMP x16", "title": "Numerical Methods", "credits": 3},
+            
+            # ─── Inferred Missing Humanities & Electives ────────────────
+            {"code": "HUM 1E3", "title": "Professional Ethics", "credits": 2, "course_type": "ELECTIVE"},
+            {"code": "HUM xE4", "title": "Engineering Economy", "credits": 2, "course_type": "ELECTIVE"},
+            
+            {"code": "EME 4E6", "title": "Elective-6", "credits": 3, "course_type": "ELECTIVE"},
+
+            # ─── Exact Matches from Faculty Documents ───────────────────
+            {"code": "EMP x19", "title": "Linear Algebra and Special Functions", "credits": 3},
+            {"code": "EMP x23", "title": "Advanced Dynamics", "credits": 3},
+            {"code": "HUM x73", "title": "Nuclear Law and Safeguards", "credits": 3, "course_type": "ELECTIVE"},
+            {"code": "HUM x81", "title": "Critical Thinking and Entrepreneurial Decision-Making", "credits": 3, "course_type": "ELECTIVE"},
+            
+            # ─── Final Missing Courses from Warnings ──────────────────────
+            {"code": "CSE 4E5", "title": "CSE Elective 5", "credits": 3, "course_type": "ELECTIVE"},
+            {"code": "STR 213", "title": "Structural Analysis - 3", "credits": 3},
+            {"code": "ARC 211", "title": "Architecture Design 3", "credits": 4},
+            {"code": "ARC 232", "title": "Building Construction 2", "credits": 3},
+            {"code": "ARC 221", "title": "History of Architecture 1", "credits": 3},
+            {"code": "ARC 231", "title": "Building Construction 1", "credits": 3},
+            {"code": "ARC 2E1", "title": "Architecture Elective 1", "credits": 2, "course_type": "ELECTIVE"},
         ]
 
         

@@ -376,7 +376,7 @@ class StudentSubmission(TimestampedModel):
         Deadline = term start_date + due_week full weeks (i.e. midnight ending that Sunday).
         """
         from datetime import timedelta, datetime, timezone
-        term     = self.assignment.course_class.term
+        term = self.assignment.course_class.group.term
         deadline = datetime(
             *term.start_date.timetuple()[:3], tzinfo=timezone.utc
         ) + timedelta(weeks=self.assignment.due_week)

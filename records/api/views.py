@@ -33,7 +33,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         
         if term_status == 'past':
             # For the Grades sidebar: /api/enrollments/?student=4&term_status=past
-            queryset = queryset.filter(course_class__term__is_active=False)
+            queryset = queryset.filter(course_class__group__term__is_active=False)
             
         elif term_status == 'all':
             # /api/enrollments/?student=4&term_status=all
@@ -41,7 +41,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             
         else:
             # /api/enrollments/?student=4
-            queryset = queryset.filter(course_class__term__is_active=True)
+            queryset = queryset.filter(course_class__group__term__is_active=True)
 
         return queryset
 
@@ -76,9 +76,9 @@ class AttendanceViewSet(viewsets.ModelViewSet):
         student_id = self.request.query_params.get("student")
 
         if term_status == "active":
-            queryset = queryset.filter(session__course_class__term__is_active=True)
+            queryset = queryset.filter(session__course_class__group__term__is_active=True)
         elif term_status == "past":
-            queryset = queryset.filter(session__course_class__term__is_active=False)
+            queryset = queryset.filter(session__course_class__group__term__is_active=False)
 
         if student_id:
             queryset = queryset.filter(student_id=student_id)
@@ -99,9 +99,9 @@ class ExamViewSet(viewsets.ModelViewSet):
 
         # 1. Filter by term
         if term_status == "active":
-            queryset = queryset.filter(course_class__term__is_active=True)
+            queryset = queryset.filter(course_class__group__term__is_active=True)
         elif term_status == "past":
-            queryset = queryset.filter(course_class__term__is_active=False)
+            queryset = queryset.filter(course_class__group__term__is_active=False)
             
         # 2. Filter by enrolled student
         if student_id:
@@ -123,9 +123,9 @@ class AssignmentViewSet(viewsets.ModelViewSet):
 
         # 1. Filter by term
         if term_status == "active":
-            queryset = queryset.filter(course_class__term__is_active=True)
+            queryset = queryset.filter(course_class__group__term__is_active=True)
         elif term_status == "past":
-            queryset = queryset.filter(course_class__term__is_active=False)
+            queryset = queryset.filter(course_class__group__term__is_active=False)
             
         # 2. Filter by enrolled student
         if student_id:
