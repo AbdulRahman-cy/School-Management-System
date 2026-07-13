@@ -173,7 +173,6 @@ CURRICULUM_BLUEPRINT = {
 from django.core.management.base import BaseCommand
 from academics.models import Term, StudyGroup, Course, CourseClass
 
-# [KEEP YOUR EXACT CURRICULUM_BLUEPRINT DICTIONARY HERE]
 
 class Command(BaseCommand):
     help = "Seeds CourseClasses across all terms using the strict Curriculum Blueprint."

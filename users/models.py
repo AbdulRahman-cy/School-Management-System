@@ -1,8 +1,31 @@
 from decimal import Decimal
-
 from django.db import models
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin, UserManager
+from django.utils import timezone
 
+# 1. The Custom Manager (The Filter)
+class ActiveManager(models.Manager):
+    def get_queryset(self):
+        # Automatically hides any row where is_active is False
+        return super().get_queryset().filter(is_active=True)
+
+# 2. The Abstract Base Model (The Blueprint)
+class SoftDeleteModel(models.Model):
+    is_active = models.BooleanField(default=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True  # Tells Django NOT to create a separate database table for this
+
+    def delete(self, *args, **kwargs):
+        """The Soft Delete: flips the boolean instead of erasing the row."""
+        self.is_active = False
+        self.deleted_at = timezone.now()
+        self.save()
+
+    def hard_delete(self, *args, **kwargs):
+        """The Permanent Delete: bypasses the soft delete completely."""
+        super().delete(*args, **kwargs)
 
 class TimestampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
@@ -10,6 +33,11 @@ class TimestampedModel(models.Model):
 
     class Meta:
         abstract = True
+
+class ActiveUserManager(UserManager):
+    def get_queryset(self):
+        return super().get_queryset().filter(is_active=True)
+
 
 
 class BaseUserManager_(BaseUserManager):
@@ -21,6 +49,8 @@ class BaseUserManager_(BaseUserManager):
         user.set_password(password)
         user.save(using=self._db)
         return user
+
+    
 
     def create_superuser(self, email, password=None, **extra_fields):
         extra_fields.setdefault("role", BaseUser.Role.ADMIN)
@@ -42,10 +72,18 @@ class BaseUser(AbstractBaseUser, PermissionsMixin, TimestampedModel):
     is_active  = models.BooleanField(default=True)
     is_staff   = models.BooleanField(default=False)
 
-    objects = BaseUserManager_()
-
     USERNAME_FIELD  = "email"
     REQUIRED_FIELDS = ["first_name", "last_name", "role"]
+
+    objects = ActiveUserManager()
+    all_objects = UserManager()
+
+    def delete(self, *args, **kwargs):
+        """
+        MVP Soft Delete: Instantly kills all active JWTs by setting the user to inactive.
+        """
+        self.is_active = False
+        self.save()
 
     @property
     def full_name(self):
@@ -55,7 +93,7 @@ class BaseUser(AbstractBaseUser, PermissionsMixin, TimestampedModel):
         return f"{self.full_name} <{self.email}>"
 
 
-class TeacherProfile(TimestampedModel):
+class TeacherProfile(TimestampedModel, SoftDeleteModel):
     class Rank(models.TextChoices):
         TA         = "TA",         "Teaching Assistant"
         LECTURER   = "LECTURER",   "Lecturer"
@@ -72,11 +110,14 @@ class TeacherProfile(TimestampedModel):
     )
     rank       = models.CharField(max_length=20, choices=Rank.choices)
 
+    objects = ActiveManager()
+    all_objects = models.Manager()
+
     def __str__(self):
         return f"{self.user.full_name} ({self.get_rank_display()})"
 
 
-class StudentProfile(TimestampedModel):
+class StudentProfile(TimestampedModel, SoftDeleteModel):
     user            = models.OneToOneField(BaseUser, on_delete=models.CASCADE, related_name="student_profile")
     discipline      = models.ForeignKey(
         "academics.Discipline",
@@ -86,6 +127,9 @@ class StudentProfile(TimestampedModel):
     )
     enrollment_year = models.PositiveIntegerField()
     cumulative_gpa  = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+
+    objects = ActiveManager()   
+    all_objects = models.Manager()
 
     @property
     def calculated_gpa(self) -> Decimal:

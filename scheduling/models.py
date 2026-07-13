@@ -52,6 +52,13 @@ class Session(TimestampedModel):
         LAB      = "LAB",      "Lab"
         TUTORIAL = "TUTORIAL", "Tutorial"
 
+    # Session type -> allowed room types. Defined once, not rebuilt per call.
+    ALLOWED_ROOM_TYPES = {
+        SessionType.LAB: ["LAB"],
+        SessionType.LECTURE: ["LECTURE"],
+        SessionType.TUTORIAL: ["TUTORIAL"],
+    }
+
     course_class = models.ForeignKey(
         "academics.CourseClass",
         on_delete=models.CASCADE,
@@ -73,29 +80,18 @@ class Session(TimestampedModel):
         default=SessionType.LECTURE,
     )
 
-
     def clean(self):
         errors = {}
 
-        # Room type must match session type
         if self.room_id and self.session_type:
             room_type = self.room.room_type
-            if self.session_type == self.SessionType.LAB and room_type != "LAB":
-                errors["room"] = "Lab sessions must be assigned to a lab room."
-            if self.session_type == self.SessionType.LECTURE and room_type == "LAB":
-                errors["room"] = "Lecture sessions cannot be assigned to a lab room."
+            valid_room_types = self.ALLOWED_ROOM_TYPES.get(self.session_type, [])
 
-        # Room capacity must fit the group (we don't track group size yet,
-        # but the hook is here for when enrollment counts are available)
-
-        # Room must not be owned by a different discipline's department
-        if self.room_id and self.course_class_id:
-            room_dept = self.room.department
-            group_dept = self.course_class.group.discipline.department
-            if room_dept is not None and room_dept != group_dept:
+            if room_type not in valid_room_types:
+                valid_types_str = " or ".join(valid_room_types).lower()
                 errors["room"] = (
-                    f"Room {self.room.code} belongs to {room_dept.code} "
-                    f"but this group is from {group_dept.code}."
+                    f"{self.get_session_type_display()} sessions must be assigned "
+                    f"to a {valid_types_str} room. You selected a {room_type} room."
                 )
 
         if errors:

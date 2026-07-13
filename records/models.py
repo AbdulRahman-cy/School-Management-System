@@ -1,15 +1,15 @@
 from django.db import models
 from django.core.exceptions import ValidationError
-from django.db.models import Q
 from decimal import Decimal
-from users.models import TimestampedModel
+from django.db.models import Q
+from users.models import TimestampedModel, SoftDeleteModel, ActiveManager
 
 
 # ─────────────────────────────────────────────────────────────
 # Enrollment
 # ─────────────────────────────────────────────────────────────
 
-class Enrollment(TimestampedModel):
+class Enrollment(TimestampedModel, SoftDeleteModel):
     student      = models.ForeignKey(
         "users.StudentProfile",
         on_delete=models.CASCADE,
@@ -17,7 +17,7 @@ class Enrollment(TimestampedModel):
     )
     course_class = models.ForeignKey(
         "academics.CourseClass",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="enrollments",
     )
     lecture_session = models.ForeignKey(
@@ -42,6 +42,9 @@ class Enrollment(TimestampedModel):
         limit_choices_to={"session_type": "LAB"},
     )
 
+    objects = ActiveManager()
+    all_objects = models.Manager()
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -51,20 +54,42 @@ class Enrollment(TimestampedModel):
         ]
 
     def clean(self):
+        errors = {}
+
+        # 1. Session Validation
         session_fields = {
             "lecture_session":  self.lecture_session,
             "tutorial_session": self.tutorial_session,
             "lab_session":      self.lab_session,
         }
-        errors = {}
         for field_name, session in session_fields.items():
             if session and session.course_class_id != self.course_class_id:
                 errors[field_name] = (
                     f"This session does not belong to {self.course_class}. "
                     "Only sessions from the enrolled CourseClass are allowed."
                 )
+
+        # 2. Duplicate Course Constraint
+        if self.student_id and self.course_class_id:
+            target_course = self.course_class.course
+            target_term = self.course_class.group.term  
+
+            duplicate_enrollment = Enrollment.objects.filter(
+                student=self.student,
+                course_class__course=target_course,
+                course_class__term=target_term
+            ).exclude(pk=self.pk).exists()
+
+            if duplicate_enrollment:
+                errors["course_class"] = (
+                    f"Student is already enrolled in {target_course.code} for {target_term}. "
+                    "You cannot register for two different groups in the same term."
+                )
+        
+        # 3. Fire all errors at once
         if errors:
             raise ValidationError(errors)
+        
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -105,7 +130,7 @@ class Enrollment(TimestampedModel):
 # GradeEntry
 # ─────────────────────────────────────────────────────────────
 
-class GradeEntry(TimestampedModel):
+class GradeEntry(TimestampedModel, SoftDeleteModel):
     enrollment = models.ForeignKey(
         Enrollment,
         on_delete=models.CASCADE,
@@ -125,6 +150,9 @@ class GradeEntry(TimestampedModel):
         help_text="Raw score on this component's scale (not out of 100).",
     )
 
+    objects = ActiveManager()
+    all_objects = models.Manager()
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -141,7 +169,7 @@ class GradeEntry(TimestampedModel):
 # AttendanceRecord
 # ─────────────────────────────────────────────────────────────
 
-class AttendanceRecord(TimestampedModel):
+class AttendanceRecord(TimestampedModel, SoftDeleteModel):
     class Status(models.TextChoices):
         PRESENT = "PRESENT", "Present"
         ABSENT  = "ABSENT",  "Absent"
@@ -162,6 +190,9 @@ class AttendanceRecord(TimestampedModel):
         help_text="Week number within the term (1-based).",
     )
     status = models.CharField(max_length=10, choices=Status.choices)
+
+    objects = ActiveManager()
+    all_objects = models.Manager()
 
     class Meta:
         constraints = [
@@ -194,7 +225,7 @@ class AttendanceRecord(TimestampedModel):
 # Exam
 # ─────────────────────────────────────────────────────────────
 
-class Exam(TimestampedModel):
+class Exam(TimestampedModel, SoftDeleteModel):
     class ExamType(models.TextChoices):
         MIDTERM   = "MIDTERM",   "Midterm Exam"
         FINAL     = "FINAL",     "Final Exam"
@@ -215,6 +246,9 @@ class Exam(TimestampedModel):
         help_text="Maximum achievable score, e.g. 30.00 for a midterm worth 30 marks.",
     )
 
+    objects = ActiveManager()
+    all_objects = models.Manager()
+
     class Meta:
         constraints = [
             # MIDTERM and FINAL are singular per class; QUIZzes and PRACTICAL are unlimited.
@@ -233,7 +267,7 @@ class Exam(TimestampedModel):
 # ExamResult
 # ─────────────────────────────────────────────────────────────
 
-class ExamResult(TimestampedModel):
+class ExamResult(TimestampedModel, SoftDeleteModel):
     class Status(models.TextChoices):
         PRESENT  = "PRESENT",  "Present"
         ABSENT   = "ABSENT",   "Absent"
@@ -254,6 +288,9 @@ class ExamResult(TimestampedModel):
     # null  → row created after exam was held, grading not yet complete
     # 0.00  → student sat the exam and scored zero (or disqualified)
     score  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    objects = ActiveManager()
+    all_objects = models.Manager()
 
     class Meta:
         constraints = [
@@ -302,7 +339,7 @@ class ExamResult(TimestampedModel):
 # Assignment
 # ─────────────────────────────────────────────────────────────
 
-class Assignment(TimestampedModel):
+class Assignment(TimestampedModel, SoftDeleteModel):
     class AssignmentType(models.TextChoices):
         HOMEWORK = "HOMEWORK", "Homework"
         PROJECT  = "PROJECT",  "Project"
@@ -319,6 +356,9 @@ class Assignment(TimestampedModel):
     )
     max_points      = models.DecimalField(max_digits=5, decimal_places=2)
 
+    objects = ActiveManager()
+    all_objects = models.Manager()
+
     def __str__(self):
         return f"{self.course_class} | {self.get_assignment_type_display()} (due W{self.due_week})"
 
@@ -327,7 +367,7 @@ class Assignment(TimestampedModel):
 # StudentSubmission
 # ─────────────────────────────────────────────────────────────
 
-class StudentSubmission(TimestampedModel):
+class StudentSubmission(TimestampedModel, SoftDeleteModel):
     student    = models.ForeignKey(
         "users.StudentProfile",
         on_delete=models.CASCADE,
@@ -340,6 +380,9 @@ class StudentSubmission(TimestampedModel):
     )
     score        = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     submitted_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ActiveManager()
+    all_objects = models.Manager()
 
     class Meta:
         constraints = [

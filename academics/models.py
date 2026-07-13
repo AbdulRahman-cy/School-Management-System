@@ -1,17 +1,12 @@
 from django.db import models
 from django.core.exceptions import ValidationError
-
+from django.utils import timezone
+from users.models import TimestampedModel, SoftDeleteModel, ActiveManager
 
 # ─────────────────────────────────────────────────────────────
 # Abstract base
 # ─────────────────────────────────────────────────────────────
 
-class TimestampedModel(models.Model):
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
 
 
 # ─────────────────────────────────────────────────────────────
