@@ -24,6 +24,34 @@ class GradeEntrySerializer(serializers.ModelSerializer):
 # Enrollment
 # ─────────────────────────────────────────────────────────────
 
+class DashboardFilterSerializer(serializers.Serializer):
+    student = serializers.IntegerField(required=True)
+    
+    #No hidden defaults injected behind your back.
+    term_status = serializers.ChoiceField(
+        choices=['past', 'all', 'active'],
+        required=False 
+    )
+
+class DashboardEnrollmentSerializer(serializers.ModelSerializer):
+    # Flatten the relationship: Reach through Enrollment -> CourseClass -> Course
+    course_code = serializers.CharField(
+        source='course_class.course.code', 
+        read_only=True
+    )
+    course_title = serializers.CharField(
+        source='course_class.course.title', 
+        read_only=True
+    )
+
+    class Meta:
+        model = Enrollment
+        fields = [
+            'id',             
+            'course_code',    # Matches the "CODE" column
+            'course_title'    # Matches the "COURSE TITLE" column
+        ]    
+
 class EnrollmentSerializer(serializers.ModelSerializer):
     course_class        = CourseClassSerializer(read_only=True)
     grades              = GradeEntrySerializer(many=True, read_only=True)

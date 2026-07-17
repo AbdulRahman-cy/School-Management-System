@@ -79,10 +79,6 @@ def clear_auth_cookies(response):
     return response
 
 
-# ─────────────────────────────────────────────────────────────────────
-# CRUD viewsets (unchanged)
-# ─────────────────────────────────────────────────────────────────────
-
 class BaseUserViewSet(viewsets.ModelViewSet):
     queryset = BaseUser.objects.all()
     serializer_class = BaseUserSerializer

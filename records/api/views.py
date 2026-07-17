@@ -3,9 +3,9 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from .permissions import IsAdminOrReadOnly
 from records.models import Enrollment, GradeEntry, AttendanceRecord, Exam, ExamResult, Assignment, StudentSubmission
-from .serializers import EnrollmentSerializer, GradeEntrySerializer, AttendanceRecordSerializer, ExamSerializer, ExamResultSerializer, AssignmentSerializer, StudentSubmissionSerializer
-
-
+from .serializers import EnrollmentSerializer, GradeEntrySerializer, AttendanceRecordSerializer, ExamSerializer, ExamResultSerializer, AssignmentSerializer, StudentSubmissionSerializer, DashboardEnrollmentSerializer, DashboardFilterSerializer
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 
 class EnrollmentViewSet(viewsets.ModelViewSet):
@@ -19,7 +19,6 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at']
 
     def get_queryset(self):
-        
         queryset = Enrollment.objects.select_related(
             'student', 
             'course_class'
@@ -27,10 +26,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             'grades'
         )
 
-        
         term_status = self.request.query_params.get('term_status')
 
-        
         if term_status == 'past':
             # For the Grades sidebar: /api/enrollments/?student=4&term_status=past
             queryset = queryset.filter(course_class__group__term__is_active=False)
@@ -44,6 +41,41 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(course_class__group__term__is_active=True)
 
         return queryset
+
+    
+    @action(detail=False, methods=['get'], url_path='dashboard-summary')
+    def dashboard_summary(self, request):
+        
+        param_serializer = DashboardFilterSerializer(data=request.query_params)
+        param_serializer.is_valid(raise_exception=True)
+        
+        # Safely extract variables
+        student_id = param_serializer.validated_data['student']
+        
+        # Use .get() because term_status might be missing
+        term_status = param_serializer.validated_data.get('term_status')
+
+        # Base queryset
+        queryset = Enrollment.objects.filter(
+            student_id=student_id
+        ).select_related(
+            'student', 
+            'course_class__course'
+        )
+
+        # Explicit business logic
+        if term_status == 'past':
+            queryset = queryset.filter(course_class__group__term__is_active=False)
+            
+        elif term_status == 'all':
+            pass # Return all enrollments in history
+            
+        else:
+            # It catches term_status == 'active' AND term_status == None
+            queryset = queryset.filter(course_class__group__term__is_active=True)
+
+        serializer = DashboardEnrollmentSerializer(queryset, many=True)
+        return Response(serializer.data)
 
 
 class GradeEntryViewSet(viewsets.ModelViewSet):

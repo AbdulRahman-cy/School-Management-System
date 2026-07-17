@@ -49,8 +49,7 @@ class StudyGroupSerializer(serializers.ModelSerializer):
 
 
 class CourseClassSerializer(serializers.ModelSerializer):
-    course  = CourseSerializer(read_only=True)
-    term = TermSerializer(read_only=True)
+    course = CourseSerializer(read_only=True)
     group = StudyGroupSerializer(read_only=True)
 
     class Meta:
@@ -58,16 +57,7 @@ class CourseClassSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "course", 
-            "term",   
             "group",  
-            "created_at", "updated_at",
+            "created_at", 
+            "updated_at",
         ]
-
-    def validate(self, data):
-        group = data.get("group") or getattr(self.instance, "group", None)
-        term  = data.get("term")  or getattr(self.instance, "term",  None)
-        if group and term and group.term_id != term.pk:
-            raise serializers.ValidationError(
-                {"group": "The study group's term must match the course class term."}
-            )
-        return data

@@ -50,7 +50,7 @@ class BaseUserManager_(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    
+
 
     def create_superuser(self, email, password=None, **extra_fields):
         extra_fields.setdefault("role", BaseUser.Role.ADMIN)
@@ -77,6 +77,7 @@ class BaseUser(AbstractBaseUser, PermissionsMixin, TimestampedModel):
 
     objects = ActiveUserManager()
     all_objects = UserManager()
+    
 
     def delete(self, *args, **kwargs):
         """
@@ -112,7 +113,7 @@ class TeacherProfile(TimestampedModel, SoftDeleteModel):
 
     objects = ActiveManager()
     all_objects = models.Manager()
-
+    
     def __str__(self):
         return f"{self.user.full_name} ({self.get_rank_display()})"
 

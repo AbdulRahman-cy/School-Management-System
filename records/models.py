@@ -9,7 +9,30 @@ from users.models import TimestampedModel, SoftDeleteModel, ActiveManager
 # Enrollment
 # ─────────────────────────────────────────────────────────────
 
-class Enrollment(TimestampedModel, SoftDeleteModel):
+class EnrollmentManager(models.Manager):
+    """
+    By default, Enrollment.objects.all() returns EVERYTHING (Active, Dropped, Withdrawn).
+    Admins and Finance need to see the full historical ledger.
+    """
+    def active(self):
+        """Used for checking current active seating capacity and active gradebooks."""
+        return self.filter(status=self.model.EnrollmentStatus.ENROLLED)
+
+    def historical(self):
+        """Used for transcript generation and financial audits."""
+        return self.filter(status__in=[
+            self.model.EnrollmentStatus.DROPPED, 
+            self.model.EnrollmentStatus.WITHDRAWN,
+            self.model.EnrollmentStatus.COMPLETED
+        ])
+
+class Enrollment(TimestampedModel):
+    class EnrollmentStatus(models.TextChoices):
+        ENROLLED  = "ENROLLED",  "Enrolled (Active)"
+        DROPPED   = "DROPPED",   "Dropped (Early/Refunded)"
+        WITHDRAWN = "WITHDRAWN", "Withdrawn (W on Transcript)"
+        COMPLETED = "COMPLETED", "Completed (Final Grade Issued)"
+
     student      = models.ForeignKey(
         "users.StudentProfile",
         on_delete=models.CASCADE,
@@ -41,8 +64,13 @@ class Enrollment(TimestampedModel, SoftDeleteModel):
         related_name="lab_enrollments",
         limit_choices_to={"session_type": "LAB"},
     )
+    status = models.CharField(
+        max_length=15,
+        choices=EnrollmentStatus.choices,
+        default=EnrollmentStatus.ENROLLED, 
+    )
 
-    objects = ActiveManager()
+    objects = EnrollmentManager()
     all_objects = models.Manager()
 
     class Meta:
@@ -130,7 +158,7 @@ class Enrollment(TimestampedModel, SoftDeleteModel):
 # GradeEntry
 # ─────────────────────────────────────────────────────────────
 
-class GradeEntry(TimestampedModel, SoftDeleteModel):
+class GradeEntry(TimestampedModel):
     enrollment = models.ForeignKey(
         Enrollment,
         on_delete=models.CASCADE,
@@ -150,9 +178,6 @@ class GradeEntry(TimestampedModel, SoftDeleteModel):
         help_text="Raw score on this component's scale (not out of 100).",
     )
 
-    objects = ActiveManager()
-    all_objects = models.Manager()
-
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -169,7 +194,7 @@ class GradeEntry(TimestampedModel, SoftDeleteModel):
 # AttendanceRecord
 # ─────────────────────────────────────────────────────────────
 
-class AttendanceRecord(TimestampedModel, SoftDeleteModel):
+class AttendanceRecord(TimestampedModel):
     class Status(models.TextChoices):
         PRESENT = "PRESENT", "Present"
         ABSENT  = "ABSENT",  "Absent"
@@ -190,9 +215,6 @@ class AttendanceRecord(TimestampedModel, SoftDeleteModel):
         help_text="Week number within the term (1-based).",
     )
     status = models.CharField(max_length=10, choices=Status.choices)
-
-    objects = ActiveManager()
-    all_objects = models.Manager()
 
     class Meta:
         constraints = [
@@ -225,7 +247,7 @@ class AttendanceRecord(TimestampedModel, SoftDeleteModel):
 # Exam
 # ─────────────────────────────────────────────────────────────
 
-class Exam(TimestampedModel, SoftDeleteModel):
+class Exam(TimestampedModel):
     class ExamType(models.TextChoices):
         MIDTERM   = "MIDTERM",   "Midterm Exam"
         FINAL     = "FINAL",     "Final Exam"
@@ -246,8 +268,6 @@ class Exam(TimestampedModel, SoftDeleteModel):
         help_text="Maximum achievable score, e.g. 30.00 for a midterm worth 30 marks.",
     )
 
-    objects = ActiveManager()
-    all_objects = models.Manager()
 
     class Meta:
         constraints = [
@@ -267,7 +287,7 @@ class Exam(TimestampedModel, SoftDeleteModel):
 # ExamResult
 # ─────────────────────────────────────────────────────────────
 
-class ExamResult(TimestampedModel, SoftDeleteModel):
+class ExamResult(TimestampedModel):
     class Status(models.TextChoices):
         PRESENT  = "PRESENT",  "Present"
         ABSENT   = "ABSENT",   "Absent"
@@ -289,8 +309,6 @@ class ExamResult(TimestampedModel, SoftDeleteModel):
     # 0.00  → student sat the exam and scored zero (or disqualified)
     score  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
-    objects = ActiveManager()
-    all_objects = models.Manager()
 
     class Meta:
         constraints = [
@@ -339,7 +357,7 @@ class ExamResult(TimestampedModel, SoftDeleteModel):
 # Assignment
 # ─────────────────────────────────────────────────────────────
 
-class Assignment(TimestampedModel, SoftDeleteModel):
+class Assignment(TimestampedModel):
     class AssignmentType(models.TextChoices):
         HOMEWORK = "HOMEWORK", "Homework"
         PROJECT  = "PROJECT",  "Project"
@@ -356,8 +374,6 @@ class Assignment(TimestampedModel, SoftDeleteModel):
     )
     max_points      = models.DecimalField(max_digits=5, decimal_places=2)
 
-    objects = ActiveManager()
-    all_objects = models.Manager()
 
     def __str__(self):
         return f"{self.course_class} | {self.get_assignment_type_display()} (due W{self.due_week})"
@@ -367,7 +383,7 @@ class Assignment(TimestampedModel, SoftDeleteModel):
 # StudentSubmission
 # ─────────────────────────────────────────────────────────────
 
-class StudentSubmission(TimestampedModel, SoftDeleteModel):
+class StudentSubmission(TimestampedModel):
     student    = models.ForeignKey(
         "users.StudentProfile",
         on_delete=models.CASCADE,
@@ -381,8 +397,6 @@ class StudentSubmission(TimestampedModel, SoftDeleteModel):
     score        = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     submitted_at = models.DateTimeField(auto_now_add=True)
 
-    objects = ActiveManager()
-    all_objects = models.Manager()
 
     class Meta:
         constraints = [
