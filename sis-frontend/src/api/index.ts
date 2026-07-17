@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "./auth";
 import type {
-  StudentProfile, Enrollment, Session,
+  StudentProfile, Enrollment, EnrollmentRow, Session,
   ExamResult, StudentSubmission, Exam, Assignment,
 } from "../types";
  
@@ -34,6 +34,16 @@ async function fetchEnrollments(
   termStatus: "active" | "past" | "all" = "active",
 ): Promise<Enrollment[]> {
   const { data } = await apiClient.get<Enrollment[]>("/records/enrollments/", {
+    params: { student: studentId, term_status: termStatus },
+  });
+  return data;
+}
+
+async function fetchEnrollmentSummary(
+  studentId: number,
+  termStatus: "active" | "past" | "all" = "active",
+): Promise<EnrollmentRow[]> {
+  const { data } = await apiClient.get<EnrollmentRow[]>("/records/enrollments/dashboard-summary/", {
     params: { student: studentId, term_status: termStatus },
   });
   return data;
@@ -97,7 +107,7 @@ export function useEnrollments(
 ) {
   return useQuery({
     queryKey:  queryKeys.enrollments(studentId ?? 0, termStatus),
-    queryFn:   () => fetchEnrollments(studentId as number, termStatus),
+    queryFn:   () => fetchEnrollmentSummary(studentId as number, termStatus),
     staleTime: 2 * 60 * 1000,
     retry:     1,
     enabled:   ENABLED(studentId),

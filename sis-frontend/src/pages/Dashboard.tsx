@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useStudentProfile, useEnrollments, useStudentSessions, usePastEnrollments, useUpcomingExams, useUpcomingAssignments } from "../api";
-import type { Enrollment, Session, GradeEntry, NextClassInfo, CohortStats } from "../types";
+import type { Enrollment, EnrollmentRow, Session, GradeEntry, NextClassInfo, CohortStats } from "../types";
 import Attendance from "./Attendance";
 import CourseworkDashboard from "./CourseworkDashboard";
 import { getCourseColorTheme } from "../courseColors";
@@ -660,15 +660,15 @@ export default function UniversityPortal() {
                           ? [0,1,2,3,4].map(i => (
                               <tr key={i}><td style={{ padding: "10px 14px" }}><Skeleton w={70} h={14} /></td><td style={{ padding: "10px 14px" }}><Skeleton w="70%" h={14} /></td></tr>
                             ))
-                          : (enrollments ?? []).map((enr: Enrollment) => (
+                          : (enrollments ?? []).map((enr: EnrollmentRow) => (
                               <tr key={enr.id} style={{ borderBottom: "1px solid #fafafa" }}
                                 onMouseEnter={e => (e.currentTarget.style.background = "#faf5ff")}
                                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                               >
                                 <td style={{ padding: "10px 14px" }}>
-                                  <CourseCodePill code={enr.course_class.course.code} />
+                                  <CourseCodePill code={enr.course_code} />
                                 </td>
-                                <td style={{ padding: "10px 14px", fontSize: 12.5, color: "#374151", fontWeight: 500 }}>{enr.course_class.course.title}</td>
+                                <td style={{ padding: "10px 14px", fontSize: 12.5, color: "#374151", fontWeight: 500 }}>{enr.course_title}</td>
                               </tr>
                             ))
                         }

@@ -262,14 +262,11 @@ export interface StudentSubmission extends Timestamps {
 
 // ─── UI-layer derived types ───────────────────────────────────────────────────
 
-/** Enriched enrollment row used in the Dashboard course table */
+/** Flat enrollment summary used in the Dashboard course table */
 export interface EnrollmentRow {
-  enrollmentId: number;
-  courseClassId: number;
-  finalPercentage: number;
-  courseGradePoints: number;
-  gradeLabel: string;   // e.g. "A-", "B+", computed from grade_points
-  grades: GradeEntry[];
+  id: number;
+  course_code: string;
+  course_title: string;
 }
 
 /** Resolved "next class" data surfaced to the NextClass status card */
