@@ -52,9 +52,17 @@ class DashboardEnrollmentSerializer(serializers.ModelSerializer):
             'course_title'    # Matches the "COURSE TITLE" column
         ]    
 
+import statistics
+from django.db.models import Avg, Max, Min, Count, Q
+from rest_framework import serializers
+# ... [Keep your other imports and serializers] ...
+
 class EnrollmentSerializer(serializers.ModelSerializer):
     course_class        = CourseClassSerializer(read_only=True)
     grades              = GradeEntrySerializer(many=True, read_only=True)
+    
+    # We keep these ReadOnly so clients can't manually set them via API, 
+    # but they now map directly to the DB columns.
     final_percentage    = serializers.ReadOnlyField()
     course_grade_points = serializers.ReadOnlyField()
     cohort_stats        = serializers.SerializerMethodField()
@@ -70,35 +78,54 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         ]
 
     def get_cohort_stats(self, obj):
+        # Only look at peer enrollments that have at least one grade
         peer_enrollments = Enrollment.objects.filter(
             course_class=obj.course_class,
-        ).prefetch_related("grades")
+            grades__isnull=False
+        ).distinct()
 
-        percentages = [
-            float(peer.final_percentage)
-            for peer in peer_enrollments
-            if peer.grades.exists()
-        ]
+        # Let the database do the heavy lifting for averages, max, min, and distribution
+        stats = peer_enrollments.aggregate(
+            avg=Avg('final_percentage'),
+            max=Max('final_percentage'),
+            min=Min('final_percentage'),
+            total=Count('id'),
+            # Database-level distribution counts
+            A=Count('id', filter=Q(final_percentage__gte=93)),
+            A_minus=Count('id', filter=Q(final_percentage__gte=89, final_percentage__lt=93)),
+            B_plus=Count('id', filter=Q(final_percentage__gte=84, final_percentage__lt=89)),
+            B=Count('id', filter=Q(final_percentage__gte=79, final_percentage__lt=84)),
+            C_plus=Count('id', filter=Q(final_percentage__gte=74, final_percentage__lt=79)),
+            C=Count('id', filter=Q(final_percentage__gte=69, final_percentage__lt=74)),
+            D_plus=Count('id', filter=Q(final_percentage__gte=64, final_percentage__lt=69)),
+            D=Count('id', filter=Q(final_percentage__gte=60, final_percentage__lt=64)),
+            F=Count('id', filter=Q(final_percentage__lt=60)),
+        )
 
-        if not percentages:
+        if stats['total'] == 0:
             return None
 
+        # Standard SQL doesn't have a reliable Median function cross-platform.
+        # We fetch a flat, lightweight list of just the decimals to calculate it in Python.
+        percentages = list(peer_enrollments.values_list('final_percentage', flat=True))
+        median_val = statistics.median([float(p) for p in percentages])
+
         return {
-            "average":        round(statistics.mean(percentages), 1),
-            "median":         round(statistics.median(percentages), 1),
-            "highest":        max(percentages),
-            "lowest":         min(percentages),
-            "total_students": len(percentages),
+            "average":        round(float(stats['avg']), 1),
+            "median":         round(median_val, 1),
+            "highest":        float(stats['max']),
+            "lowest":         float(stats['min']),
+            "total_students": stats['total'],
             "distribution": {
-                "A":  len([p for p in percentages if p >= 93]),
-                "A-": len([p for p in percentages if 89 <= p < 93]),
-                "B+": len([p for p in percentages if 84 <= p < 89]),
-                "B":  len([p for p in percentages if 79 <= p < 84]),
-                "C+": len([p for p in percentages if 74 <= p < 79]),
-                "C":  len([p for p in percentages if 69 <= p < 74]),
-                "D+": len([p for p in percentages if 64 <= p < 69]),
-                "D":  len([p for p in percentages if 60 <= p < 64]),
-                "F":  len([p for p in percentages if p < 60]),
+                "A":  stats['A'],
+                "A-": stats['A_minus'],
+                "B+": stats['B_plus'],
+                "B":  stats['B'],
+                "C+": stats['C_plus'],
+                "C":  stats['C'],
+                "D+": stats['D_plus'],
+                "D":  stats['D'],
+                "F":  stats['F'],
             },
         }
 

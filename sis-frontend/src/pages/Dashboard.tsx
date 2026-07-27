@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useStudentProfile, useEnrollments, useStudentSessions, usePastEnrollments, useUpcomingExams, useUpcomingAssignments } from "../api";
-import type { Enrollment, EnrollmentRow, Session, GradeEntry, NextClassInfo, CohortStats } from "../types";
+import { useStudentProfile, useEnrollments, useStudentSessions, useUpcomingExams, useUpcomingAssignments } from "../api";
+import type { Enrollment, EnrollmentRow, Session, NextClassInfo } from "../types";
 import Attendance from "./Attendance";
 import CourseworkDashboard from "./CourseworkDashboard";
 import { getCourseColorTheme } from "../courseColors";
@@ -136,30 +136,6 @@ function EmptyDashboard() {
   );
 }
 
-function GradeChip({ label, gp }: { label: string; gp: number }) {
-  const isFail = gp === 0.0;
-  const isPass = gp >= 2.0;
-  return <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: isFail ? "#fee2e2" : isPass ? "#d1fae5" : "#fef3c7", color: isFail ? "#b91c1c" : isPass ? "#065f46" : "#b45309" }}>{label}</span>;
-}
-
-function GradeBreakdown({ grades }: { grades: GradeEntry[] }) {
-  return (
-    <tr style={{ background: "#faf5ff" }}>
-      <td colSpan={5} style={{ padding: "0 14px 10px 40px" }}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {grades.map(g => (
-            <div key={g.id} style={{ fontSize: 11, color: "#64748b", background: "#fff", border: "1px solid #ede9fe", borderRadius: 7, padding: "4px 10px" }}>
-              <span style={{ fontWeight: 600, color: "#1e1b4b" }}>{g.component}</span>
-              <span style={{ margin: "0 4px", opacity: 0.4 }}>·</span>
-              <span style={{ fontWeight: 600, color: "#7c3aed" }}>{parseFloat(g.score).toFixed(2)}</span>
-            </div>
-          ))}
-        </div>
-      </td>
-    </tr>
-  );
-}
-
 // ─── Command palette ──────────────────────────────────────────────────────────
 
 const CMD_SUGGESTIONS = ["View timetable", "Check attendance", "Download student card", "View exam schedule", "Pay registration fees"];
@@ -206,159 +182,13 @@ const NAV_ITEMS = [
   { id: "profile",    label: "My Profile",        icon: "◎", group: "" },
   { id: "schedule",   label: "Timetable",         icon: "▦", group: "ACADEMIC" },
   { id: "enrollment", label: "Enrollment",        icon: "⊕", group: "ACADEMIC" },
-  { id: "grades",     label: "Grades",            icon: "◈", group: "ACADEMIC", badge: 2 },
+  { id: "grades",     label: "Grades",            icon: "◈", group: "ACADEMIC" },
   { id: "exams",      label: "Exam Schedule",     icon: "◷", group: "ACADEMIC" },
   { id: "attendance", label: "Attendance",        icon: "◻", group: "ACADEMIC" },
   { id: "fees",       label: "Fees & Payments",   icon: "◇", group: "ADMIN" },
   { id: "documents",  label: "Documents",         icon: "◱", group: "ADMIN" },
   { id: "warnings",   label: "Academic Standing", icon: "△", group: "ADMIN" },
 ];
-
-// ─── Grades view ──────────────────────────────────────────────────────────────
-
-type DistBucket = keyof CohortStats["distribution"];
-
-const DIST_KEYS: DistBucket[] = ["A", "A-", "B+", "B", "C+", "C", "D+", "D", "F"];
-
-const DIST_COLORS: Record<DistBucket, { active: string; faded: string; text: string }> = {
-  "A":  { active: "#7c3aed", faded: "#ede9fe", text: "#6d28d9" },
-  "A-": { active: "#6d28d9", faded: "#ede9fe", text: "#5b21b6" },
-  "B+": { active: "#0ea5e9", faded: "#e0f2fe", text: "#0369a1" },
-  "B":  { active: "#0284c7", faded: "#e0f2fe", text: "#075985" },
-  "C+": { active: "#10b981", faded: "#d1fae5", text: "#065f46" },
-  "C":  { active: "#059669", faded: "#d1fae5", text: "#064e3b" },
-  "D+": { active: "#f59e0b", faded: "#fef3c7", text: "#92400e" },
-  "D":  { active: "#d97706", faded: "#fef3c7", text: "#78350f" },
-  "F":  { active: "#ef4444", faded: "#fee2e2", text: "#991b1b" },
-};
-
-function bucketForGp(gp: number): DistBucket {
-  if (gp >= 4.0) return "A";
-  if (gp >= 3.7) return "A-";
-  if (gp >= 3.3) return "B+";
-  if (gp >= 3.0) return "B";
-  if (gp >= 2.7) return "C+";
-  if (gp >= 2.4) return "C";
-  if (gp >= 2.0) return "D+";
-  if (gp >= 1.0) return "D";
-  return "F";
-}
-
-interface GradesViewProps { displayGpa: string; }
-
-function GradesView({ displayGpa }: GradesViewProps) {
-  const { data: enrollments, isLoading: enrollLoading } = usePastEnrollments(STUDENT_ID);
-  const gradedEnrollments = enrollments?.filter(e => e.final_percentage > 0) ?? [];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div className="ani0">
-        <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px" }}>Grades</h2>
-        <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>{gradedEnrollments.length} graded course{gradedEnrollments.length !== 1 ? "s" : ""} · GPA {displayGpa}</p>
-      </div>
-
-      {enrollLoading && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {[0,1,2].map(i => (
-            <div key={i} style={{ background: "#fff", borderRadius: 16, border: "1px solid #ede9fe", padding: 22, display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}><Skeleton w={80} h={12} /><Skeleton w={200} h={18} /></div>
-                <Skeleton w={64} h={40} r={10} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>{[0,1,2,3].map(j => <Skeleton key={j} h={48} r={8} />)}</div>
-              <Skeleton h={90} r={10} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {!enrollLoading && gradedEnrollments.length === 0 && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 320 }}>
-          <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 20, border: "1px solid #ede9fe" }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>📭</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#1e1b4b" }}>No graded courses yet</div>
-            <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>Grades will appear here once your instructors submit them.</div>
-          </div>
-        </div>
-      )}
-
-      {!enrollLoading && gradedEnrollments.map((enr, cardIdx) => {
-        const label = gradeLabel(enr.course_grade_points);
-        const pct   = enr.final_percentage;
-        const stats = enr.cohort_stats;
-        const myBucket = bucketForGp(enr.course_grade_points);
-        const maxCount = stats ? Math.max(...DIST_KEYS.map(k => stats.distribution[k]), 1) : 1;
-        const accentColor = enr.course_grade_points >= 3.7 ? "#7c3aed" : enr.course_grade_points >= 3.0 ? "#0ea5e9" : enr.course_grade_points >= 2.0 ? "#10b981" : enr.course_grade_points >= 1.0 ? "#f59e0b" : "#ef4444";
-        return (
-          <div key={enr.id} className="ani1" style={{ background: "#fff", borderRadius: 16, border: "1px solid #ede9fe", overflow: "hidden", animationDelay: `${cardIdx * 0.06}s` }}>
-            <div style={{ height: 4, background: `linear-gradient(90deg, ${accentColor}, ${accentColor}88)` }} />
-            <div style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: 18 }}>
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ marginBottom: 6 }}><CourseCodePill code={enr.course_class.course.code} /></div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.3px", lineHeight: 1.3 }}>{enr.course_class.course.title}</div>
-                </div>
-                <div style={{ textAlign: "center", flexShrink: 0, padding: "10px 16px", borderRadius: 12, background: `${accentColor}12`, border: `1.5px solid ${accentColor}30` }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: accentColor, letterSpacing: "-1px", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1 }}>{label}</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3, fontWeight: 500 }}>{pct.toFixed(1)}%</div>
-                </div>
-              </div>
-
-              {enr.grades.length > 0 && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {enr.grades.map(g => (
-                    <div key={g.id} style={{ fontSize: 11, padding: "5px 10px", borderRadius: 8, background: "#faf5ff", border: "1px solid #ede9fe", display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontWeight: 600, color: "#1e1b4b" }}>{g.component}</span>
-                      <span style={{ color: "#94a3b8" }}>·</span>
-                      <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#7c3aed", fontWeight: 600 }}>{parseFloat(g.score).toFixed(1)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {stats && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
-                  {([{ label: "Class Avg", value: stats.average.toFixed(1) + "%", icon: "◈" }, { label: "Median", value: stats.median.toFixed(1) + "%", icon: "◎" }, { label: "Highest", value: stats.highest.toFixed(1) + "%", icon: "▲" }, { label: "Students", value: String(stats.total_students), icon: "◻" }]).map(stat => (
-                    <div key={stat.label} style={{ background: "#faf5ff", borderRadius: 10, border: "1px solid #ede9fe", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
-                      <div style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", letterSpacing: ".4px", display: "flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 8, color: "#c4b5fd" }}>{stat.icon}</span>{stat.label.toUpperCase()}
-                      </div>
-                      <div style={{ fontSize: 17, fontWeight: 700, color: "#1e1b4b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: "-.5px", lineHeight: 1 }}>{stat.value}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {stats && (
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: ".5px", marginBottom: 10 }}>GRADE DISTRIBUTION</div>
-                  <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 96 }}>
-                    {DIST_KEYS.map(bucket => {
-                      const count     = stats.distribution[bucket];
-                      const isMe      = bucket === myBucket;
-                      const barHeight = Math.round((count / maxCount) * 72);
-                      const colors    = DIST_COLORS[bucket];
-                      return (
-                        <div key={bucket} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5, justifyContent: "flex-end", height: "100%" }}>
-                          {isMe ? <div style={{ fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 99, background: colors.active, color: "#fff", letterSpacing: ".3px", flexShrink: 0, boxShadow: `0 2px 8px ${colors.active}55` }}>YOU</div> : <div style={{ flex: 1 }} />}
-                          <div style={{ width: "100%", height: barHeight || 4, borderRadius: "5px 5px 3px 3px", background: isMe ? colors.active : colors.faded, transition: "height .6s cubic-bezier(.4,0,.2,1)", position: "relative" }}>
-                            {barHeight >= 20 && <div style={{ position: "absolute", top: 5, left: 0, right: 0, textAlign: "center", fontSize: 9, fontWeight: 700, color: isMe ? "#fff" : colors.text }}>{count}</div>}
-                          </div>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: isMe ? colors.active : "#94a3b8" }}>{bucket}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {!stats && <div style={{ fontSize: 12, color: "#94a3b8", fontStyle: "italic" }}>Cohort statistics not yet available for this course.</div>}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 // ─── Exam Schedule page ───────────────────────────────────────────────────────
 
@@ -381,7 +211,6 @@ export default function UniversityPortal() {
   const { data: sessions,    isLoading: sessionsLoading, isError: sessionsError } = useStudentSessions(STUDENT_ID);
   const { data: upcomingExams }       = useUpcomingExams(STUDENT_ID);
   const { data: upcomingAssignments } = useUpcomingAssignments(STUDENT_ID);
-  const { data: pastEnrollments }     = usePastEnrollments(STUDENT_ID);
 
   if (profileError)  console.error("[useStudentProfile] failed");
   if (enrollError)   console.error("[useEnrollments] failed");
@@ -394,14 +223,6 @@ export default function UniversityPortal() {
   const gpaProgress = displayGpa !== "—" ? (parseFloat(displayGpa) / 4) * 100 : 0;
   const nextClass   = useMemo(() => sessions ? resolveNextClass(sessions) : null, [sessions]);
   const attendanceProgress = useMemo(() => !sessions?.length ? 0 : Math.min(Math.round((sessions.length / 75) * 100), 100), [sessions]);
-
-  // Top performers come from PAST (graded) terms, not the active ungraded term
-  const topPerformers = useMemo(() =>
-    !pastEnrollments ? [] : [...pastEnrollments]
-      .filter(e => e.final_percentage > 0)
-      .sort((a, b) => b.final_percentage - a.final_percentage)
-      .slice(0, 5),
-  [pastEnrollments]);
 
   // Upcoming events — diverse: 1 slot per exam type, then 1 per assignment type, fill to 5
   const upcomingEvents = useMemo(() => {
@@ -467,6 +288,7 @@ export default function UniversityPortal() {
   const studentIdDisplay = profile?.id ?? "—";
   const initials         = profile ? (`${profile.user.first_name?.[0] ?? ""}${profile.user.last_name?.[0] ?? ""}` || "?") : "…";
   const studentName      = profile ? (profile.user.full_name || `${profile.user.first_name} ${profile.user.last_name}`.trim() || "—") : "—";
+  const topCourses       = profile?.top_courses ?? [];
 
   const nextClassDisplay = nextClass ? {
     code: nextClass.courseCode, title: nextClass.courseName,
@@ -508,7 +330,7 @@ export default function UniversityPortal() {
                   return (
                     <div key={item.id} className={`nav-i${isAct ? " act" : ""}`} onClick={() => setActiveNav(item.id)}>
                       <span style={{ fontSize: 14, flexShrink: 0, opacity: isAct ? 1 : 0.55 }}>{item.icon}</span>
-                      {!collapsed && (<><span style={{ flex: 1, whiteSpace: "nowrap" }}>{item.label}</span>{item.badge && <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 99, background: isAct ? "rgba(255,255,255,.25)" : "#ede9fe", color: isAct ? "#fff" : "#7c3aed" }}>{item.badge}</span>}</>)}
+                      {!collapsed && <span style={{ flex: 1, whiteSpace: "nowrap" }}>{item.label}</span>}
                     </div>
                   );
                 })}
@@ -777,46 +599,71 @@ export default function UniversityPortal() {
 
                 <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #ede9fe", overflow: "hidden" }}>
                   <div style={{ padding: "16px 20px", borderBottom: "1px solid #f3f0ff", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div><div style={{ fontSize: 13, fontWeight: 700, color: "#1e1b4b" }}>Top Performing Courses</div><div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2 }}>ranked by final percentage</div></div>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 99, background: "#faf5ff", color: "#7c3aed", border: "1px solid #ede9fe" }}>TOP {topPerformers.length}</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e1b4b" }}>Top Performing Courses</div>
+                      <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2 }}>ranked by final percentage</div>
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 99, background: "#faf5ff", color: "#7c3aed", border: "1px solid #ede9fe" }}>
+                      TOP {profile?.top_courses?.length ?? 0}
+                    </span>
                   </div>
-                  {isLoading ? (
-                    <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>{[0,1,2,3].map(i => <Skeleton key={i} h={58} r={10} />)}</div>
-                  ) : topPerformers.length === 0 ? (
-                    <div style={{ padding: "36px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No graded courses yet this term.</div>
-                  ) : (
+
+                  {topCourses.length > 0 && (
                     <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
-                      {topPerformers.map((enr, rank) => {
-                        const label    = gradeLabel(enr.course_grade_points);
-                        const pct      = enr.final_percentage;
-                        const isGold   = rank === 0, isSilver = rank === 1, isBronze = rank === 2;
-                        const barColor = pct >= 89 ? "#7c3aed" : pct >= 74 ? "#0ea5e9" : pct >= 60 ? "#10b981" : "#f59e0b";
-                        return (
-                          <div key={enr.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 16px", borderRadius: 11, background: isGold ? "linear-gradient(135deg,#fffbeb,#fef3c7)" : "#faf5ff", border: `1px solid ${isGold ? "#fde68a" : "#ede9fe"}` }}>
-                            <div style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0, background: isGold ? "linear-gradient(135deg,#f59e0b,#fbbf24)" : isSilver ? "linear-gradient(135deg,#94a3b8,#cbd5e1)" : isBronze ? "linear-gradient(135deg,#cd7c2f,#d97706)" : "#ede9fe", display: "flex", alignItems: "center", justifyContent: "center", color: rank < 3 ? "#fff" : "#7c3aed", fontSize: 11, fontWeight: 800, boxShadow: isGold ? "0 4px 12px rgba(245,158,11,0.35)" : "none" }}>#{rank+1}</div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }}>
-                                <CourseCodePill code={enr.course_class.course.code} size="sm" />
-                                <span style={{ fontSize: 12, color: "#374151", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{enr.course_class.course.title}</span>
+                      {topCourses.map((course, rank) => (
+                        <div
+                          key={course.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 14,
+                            padding: "13px 16px",
+                            borderRadius: 11,
+                            background: rank === 0 ? "linear-gradient(135deg,#fffbeb,#fef3c7)" : "#faf5ff",
+                            border: `1px solid ${rank === 0 ? "#fde68a" : "#ede9fe"}`,
+                          }}
+                        >
+                          <div style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0, background: rank === 0 ? "linear-gradient(135deg,#f59e0b,#fbbf24)" : rank === 1 ? "linear-gradient(135deg,#94a3b8,#cbd5e1)" : rank === 2 ? "linear-gradient(135deg,#cd7c2f,#d97706)" : "#ede9fe", display: "flex", alignItems: "center", justifyContent: "center", color: rank < 3 ? "#fff" : "#7c3aed", fontSize: 11, fontWeight: 800, boxShadow: rank === 0 ? "0 4px 12px rgba(245,158,11,0.35)" : "none" }}>#{rank + 1}</div>
+
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ marginBottom: 6 }}>
+                                  <CourseCodePill code={course.code} size="sm" />
+                                </div>
+                                <div style={{ fontSize: 12, color: "#374151", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.3 }}>
+                                  {course.title}
+                                </div>
+                                <div style={{ height: 3, marginTop: 10, background: "#e9e4ff", borderRadius: 99 }}>
+                                  <div style={{ width: `${Math.min(Math.max(course.percentage, 0), 100)}%`, height: "100%", background: rank === 0 ? "#f59e0b" : rank === 1 ? "#94a3b8" : rank === 2 ? "#cd7c2f" : "#7c3aed", borderRadius: 99, transition: "width 1s ease" }} />
+                                </div>
                               </div>
-                              <div style={{ height: 3, background: "#e9e4ff", borderRadius: 99 }}><div style={{ width: `${pct}%`, height: "100%", background: barColor, borderRadius: 99, transition: "width 1s ease" }} /></div>
+
+                              <div style={{ textAlign: "right", flexShrink: 0, padding: "10px 14px", borderRadius: 12, background: `${rank === 0 ? "#f59e0b" : rank === 1 ? "#94a3b8" : rank === 2 ? "#cd7c2f" : "#7c3aed"}12`, border: `1.5px solid ${rank === 0 ? "#f59e0b" : rank === 1 ? "#94a3b8" : rank === 2 ? "#cd7c2f" : "#7c3aed"}30` }}>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                                  <div style={{ fontSize: 20, fontWeight: 800, color: rank === 0 ? "#f59e0b" : rank === 1 ? "#94a3b8" : rank === 2 ? "#cd7c2f" : "#7c3aed", letterSpacing: "-1px", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1 }}>
+                                    {course.percentage.toFixed(1)}%
+                                  </div>
+                                  <div style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: course.grade === "F" ? "#fee2e2" : course.percentage >= 60 ? "#d1fae5" : "#fef3c7", color: course.grade === "F" ? "#b91c1c" : course.percentage >= 60 ? "#065f46" : "#b45309" }}>
+                                    {course.grade}
+                                  </div>
+                                </div>
+                              </div>
                             </div>
-                            <div style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: "-1px", flexShrink: 0, minWidth: 60, textAlign: "right" }}>{pct.toFixed(1)}<span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 400 }}>%</span></div>
-                            <div style={{ flexShrink: 0 }}><GradeChip label={label} gp={enr.course_grade_points} /></div>
                           </div>
-                        );
-                      })}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
               </div>
-
             ) : activeNav === "schedule" ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 <div className="ani0">
                   <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px" }}>My Timetable</h2>
                   <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>Weekly schedule · {sessions?.length ?? 0} sessions this term</p>
                 </div>
+
                 <div className="ani0" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                   {[{ type: "LECTURE", color: "#6d28d9", dot: "#7c3aed" }, { type: "LAB", color: "#065f46", dot: "#10b981" }, { type: "TUTORIAL", color: "#92400e", dot: "#f59e0b" }].map(({ type, color, dot }) => (
                     <div key={type} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color }}>
@@ -824,6 +671,7 @@ export default function UniversityPortal() {
                     </div>
                   ))}
                 </div>
+
                 <div className="ani1" style={{ background: "#fff", borderRadius: 16, border: "1px solid #ede9fe", overflow: "hidden" }}>
                   {sessionsLoading ? (
                     <div style={{ padding: 20 }}>

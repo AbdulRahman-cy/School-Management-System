@@ -138,17 +138,15 @@ class StudentProfile(TimestampedModel, SoftDeleteModel):
         Calculates the true cumulative GPA weighted by course credits.
         """
         # Fetch all enrollments for this student, joining the course to get credits
-        enrollments = self.enrollments.select_related('course_class__course').prefetch_related('grades')
+        enrollments = self.enrollments.select_related('course_class__course')
         
         total_quality_points = Decimal('0.00')
         total_credits = 0
 
         for enr in enrollments:
-            # Prevent "in-progress" courses with 0 grades from tanking the GPA to a 0.0
-            if enr.grades.exists():
+            # FIX: Only include courses that have officially been assigned grade points (Completed courses)
+            if enr.course_grade_points is not None:
                 credits = enr.course_class.course.credits
-                
-                # Multiply the 0.0-4.0 scale by the course credits
                 total_quality_points += Decimal(str(enr.course_grade_points)) * credits
                 total_credits += credits
 

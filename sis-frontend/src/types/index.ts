@@ -158,6 +158,15 @@ export interface StudentProfile extends Timestamps {
   discipline: Discipline | null; // nested
   enrollment_year: number;
   cumulative_gpa: string | null; // DecimalField serialises as string
+  top_courses: TopCourse[];
+}
+
+export interface TopCourse {
+  id: number;
+  code: string;
+  title: string;
+  percentage: number;
+  grade: string;
 }
 
 // ─── records.models ──────────────────────────────────────────────────────────

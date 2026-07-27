@@ -1,6 +1,9 @@
 from rest_framework import serializers
-from academics.api.serializers import DisciplineSerializer
+from academics.api.serializers import DisciplineSerializer, DepartmentSerializer, CourseSerializer
 from users.models import BaseUser, TeacherProfile, StudentProfile
+from records.models import Enrollment
+from django.contrib.auth.password_validation import validate_password
+from django.db.models import F
 
 
 class BaseUserSerializer(serializers.ModelSerializer):
@@ -17,22 +20,41 @@ class TeacherProfileSerializer(serializers.ModelSerializer):
         model  = TeacherProfile
         fields = ["id", "user", "user_name", "department", "department_name", "rank", "created_at", "updated_at"]
 
+class TopCourseEnrollmentSerializer(serializers.ModelSerializer):
+    # Flatten the nested course data into the root JSON object
+    code = serializers.CharField(source='course_class.course.code', read_only=True)
+    title = serializers.CharField(source='course_class.course.title', read_only=True)
+    
+    # Read the dynamic python properties you defined on your Enrollment model
+    percentage = serializers.ReadOnlyField(source='final_percentage') 
+    grade = serializers.ReadOnlyField(source='letter_grade') # Adjust 'letter_grade' to your actual property name!
+
+    class Meta:
+        model = Enrollment
+        fields = ['id', 'code', 'title', 'percentage', 'grade']
 
 class StudentProfileSerializer(serializers.ModelSerializer):
     user = BaseUserSerializer(read_only=True)
     discipline = DisciplineSerializer(read_only=True)
-
     cumulative_gpa = serializers.ReadOnlyField(source='calculated_gpa')
+    
+    top_courses = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentProfile
-        fields = ['id', 'user', 'discipline', 'enrollment_year', 'cumulative_gpa']
+        fields = ['id', 'user', 'discipline', 'enrollment_year', 'cumulative_gpa', 'top_courses']
+    def get_top_courses(self, obj):
+        # Let the database do the sorting and slicing!
+        top_enrollments = Enrollment.objects.filter(
+            student=obj
+        ).select_related(
+            'course_class__course'
+        ).order_by(
+            # Sort descending, but force NULL (active courses) to the bottom
+            F('final_percentage').desc(nulls_last=True)
+        )[:5] # The slice translates to a SQL "LIMIT 5"
 
-
-from rest_framework import serializers
-from django.contrib.auth.password_validation import validate_password
-from users.models import BaseUser, TeacherProfile, StudentProfile
-
+        return TopCourseEnrollmentSerializer(top_enrollments, many=True).data
 
 class RegisterSerializer(serializers.ModelSerializer):
     password  = serializers.CharField(write_only=True, validators=[validate_password])

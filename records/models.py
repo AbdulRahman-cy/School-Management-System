@@ -70,6 +70,17 @@ class Enrollment(TimestampedModel):
         default=EnrollmentStatus.ENROLLED, 
     )
 
+    final_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        help_text="Official final grade. Null until enrollment is COMPLETED."
+    )
+
+    course_grade_points = models.DecimalField(
+        max_digits=3, decimal_places=2, 
+        null=True, blank=True,  # Allow it to be empty mid-semester
+        help_text="Only calculated when enrollment is COMPLETED."
+    )
+
     objects = EnrollmentManager()
     all_objects = models.Manager()
 
@@ -80,6 +91,7 @@ class Enrollment(TimestampedModel):
                 name="unique_student_enrollment",
             )
         ]
+
 
     def clean(self):
         errors = {}
@@ -105,7 +117,7 @@ class Enrollment(TimestampedModel):
             duplicate_enrollment = Enrollment.objects.filter(
                 student=self.student,
                 course_class__course=target_course,
-                course_class__term=target_term
+                course_class__group__term=target_term  
             ).exclude(pk=self.pk).exists()
 
             if duplicate_enrollment:
@@ -123,35 +135,35 @@ class Enrollment(TimestampedModel):
         self.full_clean()
         super().save(*args, **kwargs)
 
-    @property
-    def final_percentage(self):
-        """
-        Sums raw scores across all GradeEntry rows.
-        Scores already represent the actual mark out of the total
-        (e.g. 28/30 midterm, 45/50 final, 4/5 quiz) so no weighting needed.
-        Returns 0.00 if no grades have been entered yet.
-        """
-        grades = self.grades.all()
-        if not grades:
-            return 0.00
-        return sum(grade.score for grade in grades)
+    def recalculate_grades(self):
+        # 1. Fail fast: If active, clear grades and skip the database query entirely
+        if self.status != self.EnrollmentStatus.COMPLETED:
+            self.final_percentage = None
+            self.course_grade_points = None
+            # Recall Hussein Nasser 's advice: only update the fields that changed to avoid lost updates in concurrent scenarios.
+            self.save(update_fields=['final_percentage', 'course_grade_points', 'updated_at'])
+            return
 
-    @property
-    def course_grade_points(self):
-        """Converts Alexandria University percentage to 4.0 GPA scale."""
-        score = self.final_percentage
-        if score >= 93: return 4.0  # A
-        if score >= 89: return 3.7  # A-
-        if score >= 84: return 3.3  # B+
-        if score >= 79: return 3.0  # B
-        if score >= 74: return 2.7  # C+
-        if score >= 69: return 2.4  # C
-        if score >= 64: return 2.0  # D+
-        if score >= 60: return 1.0  # D
-        return 0.0                  # F
+        # 2. Only hit the database if the term is actually over
+        from django.db.models import Sum
+        from decimal import Decimal
+        
+        raw_total = self.grades.aggregate(total_score=Sum('score'))['total_score'] or 0
+        total = Decimal(str(raw_total)).quantize(Decimal('0.01'))
 
-    def __str__(self):
-        return f"{self.student} → {self.course_class}"
+        self.final_percentage = total
+        
+        if total >= 93: self.course_grade_points = Decimal('4.0')
+        elif total >= 89: self.course_grade_points = Decimal('3.7')
+        elif total >= 84: self.course_grade_points = Decimal('3.3')
+        elif total >= 79: self.course_grade_points = Decimal('3.0')
+        elif total >= 74: self.course_grade_points = Decimal('2.7')
+        elif total >= 69: self.course_grade_points = Decimal('2.4')
+        elif total >= 64: self.course_grade_points = Decimal('2.0')
+        elif total >= 60: self.course_grade_points = Decimal('1.0')
+        else: self.course_grade_points = Decimal('0.0')
+
+        self.save(update_fields=['final_percentage', 'course_grade_points', 'updated_at'])
 
 
 # ─────────────────────────────────────────────────────────────
@@ -183,6 +195,14 @@ class GradeEntry(TimestampedModel):
             models.UniqueConstraint(
                 fields=["enrollment", "component"],
                 name="unique_grade_component_per_enrollment",
+            )
+        ]
+
+        # Here is the index
+        indexes = [
+            models.Index(
+                fields=['enrollment', 'score'], 
+                name='idx_enrollment_score_cover'
             )
         ]
 
@@ -223,7 +243,6 @@ class AttendanceRecord(TimestampedModel):
                 name="unique_attendance_per_session_week",
             )
         ]
-
     def clean(self):
         is_enrolled = Enrollment.objects.filter(
             student=self.student,
@@ -444,20 +463,18 @@ class StudentSubmission(TimestampedModel):
 
 
 # ─────────────────────────────────────────────────────────────
-# Signal: sync ExamResult → GradeEntry automatically
+# Signals
 # ─────────────────────────────────────────────────────────────
-# Placed here so no apps.py / ready() hook is needed.
-# When a score is recorded on an ExamResult, the corresponding
-# GradeEntry is created or updated immediately.
-
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
-@receiver(post_save, sender=ExamResult)
+# ExamResult -> GradeEntry sync (Your existing signal)
+@receiver(post_save, sender='records.ExamResult')
 def sync_exam_result_to_grade_entry(sender, instance, **kwargs):
     if instance.score is None:
-        return  # not graded yet — leave GradeEntry untouched
+        return
 
+    from records.models import Enrollment, GradeEntry # Local import to avoid circular dependencies if any
     enrollment = Enrollment.objects.filter(
         student=instance.student,
         course_class=instance.exam.course_class,
@@ -471,3 +488,14 @@ def sync_exam_result_to_grade_entry(sender, instance, **kwargs):
         component=instance.exam.get_exam_type_display(),
         defaults={"score": instance.score},
     )
+
+@receiver(post_save, sender='records.GradeEntry')
+@receiver(post_delete, sender='records.GradeEntry')
+def sync_enrollment_totals(sender, instance, **kwargs):
+    """
+    Whenever a GradeEntry is created, updated, or deleted,
+    recalculate the parent Enrollment's total grade.
+    """
+    if instance.enrollment_id:
+        # Fetch fresh instance to avoid stale data
+        instance.enrollment.recalculate_grades()

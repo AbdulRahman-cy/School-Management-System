@@ -1,0 +1,2182 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files and files not matching ignore patterns, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: **/api/**, **/models.py
+- Files matching these patterns are excluded: **/__pycache__/**
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+academics/
+  api/
+    permissions.py
+    serializers.py
+    urls.py
+    views.py
+  models.py
+records/
+  api/
+    permissions.py
+    serializers.py
+    urls.py
+    views.py
+  models.py
+scheduling/
+  api/
+    permissions.py
+    serializers.py
+    urls.py
+    views.py
+  models.py
+users/
+  api/
+    authentication.py
+    permissions.py
+    serializers.py
+    urls.py
+    views.py
+  models.py
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="academics/api/permissions.py">
+from rest_framework.permissions import BasePermission, SAFE_METHODS
+
+class IsAdminOrReadOnly(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:  # GET, HEAD, OPTIONS
+            return request.user.is_authenticated
+        return request.user.is_authenticated and request.user.role == "ADMIN"
+</file>
+
+<file path="records/api/permissions.py">
+from rest_framework.permissions import BasePermission, SAFE_METHODS
+
+class IsAdminOrReadOnly(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:  # GET, HEAD, OPTIONS
+            return request.user.is_authenticated
+        return request.user.is_authenticated and request.user.role == "ADMIN"
+</file>
+
+<file path="users/api/authentication.py">
+"""
+Custom JWT authentication that reads the access token from an HttpOnly cookie
+instead of the Authorization header.
+
+This is the foundation of the XSS-resistant strategy: JS never touches the
+token, so XSS cannot exfiltrate it.
+"""
+from rest_framework_simplejwt.authentication import JWTAuthentication
+
+
+class JWTCookieAuthentication(JWTAuthentication):
+    """
+    Authenticates using a JWT in an HttpOnly cookie.
+    Falls back to the Authorization header so curl/Postman still work in dev.
+    """
+
+    def authenticate(self, request):
+        # Try header-based auth first (browsable API, dev tools, Postman)
+        header_result = super().authenticate(request)
+        if header_result is not None:
+            return header_result
+
+        raw_token = request.COOKIES.get('access_token')
+        if raw_token is None:
+            return None
+
+        validated_token = self.get_validated_token(raw_token)
+        user = self.get_user(validated_token)
+        return user, validated_token
+</file>
+
+<file path="scheduling/api/permissions.py">
+from rest_framework.permissions import BasePermission, SAFE_METHODS
+
+class IsAdminOrReadOnly(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:  # GET, HEAD, OPTIONS
+            return request.user.is_authenticated
+        return request.user.is_authenticated and request.user.role == "ADMIN"
+</file>
+
+<file path="users/api/permissions.py">
+from rest_framework.permissions import BasePermission
+
+class IsAdmin(BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and request.user.role == "ADMIN"
+</file>
+
+<file path="users/api/urls.py">
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
+
+from users.api.views import BaseUserViewSet, TeacherProfileViewSet, StudentProfileViewSet
+
+router = DefaultRouter()
+router.register(r'users',    BaseUserViewSet,        basename='user')
+router.register(r'teachers', TeacherProfileViewSet,  basename='teacher')
+router.register(r'students', StudentProfileViewSet,  basename='student')
+
+urlpatterns = [
+    path('', include(router.urls)),
+]
+</file>
+
+<file path="scheduling/api/serializers.py">
+from rest_framework import serializers
+from academics.api.serializers import CourseClassSerializer, RoomSerializer
+from scheduling.models import Timeslot, Session
+
+
+class TimeslotSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Timeslot
+        fields = [
+            "id", "day", "period", "created_at", "updated_at",
+        ]
+
+class SessionSerializer(serializers.ModelSerializer):
+    # THESE MUST BE EXPLICITLY DECLARED
+    course_class = CourseClassSerializer(read_only=True)
+    room = RoomSerializer(read_only=True)
+    timeslot = TimeslotSerializer(read_only=True)
+
+    class Meta:
+        model = Session
+        fields = ['id', 'course_class', 'session_type', 'timeslot', 'room']
+
+class ScheduleSessionSerializer(serializers.ModelSerializer):
+
+    course_name = serializers.CharField(source='course_class.course.title', read_only=True)
+    course_code = serializers.CharField(source='course_class.course.code', read_only=True)
+    room = serializers.CharField(source='room.name', read_only=True)
+    timeslot = TimeslotSerializer(read_only=True)
+    
+    class Meta:
+        model = Session
+        fields = ['id', 'course_name', 'course_code', 'session_type', 'timeslot', 'room']
+</file>
+
+<file path="users/api/serializers.py">
+from rest_framework import serializers
+from academics.api.serializers import DisciplineSerializer, DepartmentSerializer, CourseSerializer
+from users.models import BaseUser, TeacherProfile, StudentProfile
+from records.models import Enrollment
+from django.contrib.auth.password_validation import validate_password
+from django.db.models import F
+
+
+class BaseUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = BaseUser
+        fields = ["id", "email", "first_name", "last_name", "role", "created_at", "updated_at"]
+
+
+class TeacherProfileSerializer(serializers.ModelSerializer):
+    user_name       = serializers.StringRelatedField(source="user")
+    department_name = serializers.StringRelatedField(source="department")
+
+    class Meta:
+        model  = TeacherProfile
+        fields = ["id", "user", "user_name", "department", "department_name", "rank", "created_at", "updated_at"]
+
+class TopCourseEnrollmentSerializer(serializers.ModelSerializer):
+    # Flatten the nested course data into the root JSON object
+    code = serializers.CharField(source='course_class.course.code', read_only=True)
+    title = serializers.CharField(source='course_class.course.title', read_only=True)
+    
+    # Read the dynamic python properties you defined on your Enrollment model
+    percentage = serializers.ReadOnlyField(source='final_percentage') 
+    grade = serializers.ReadOnlyField(source='letter_grade') # Adjust 'letter_grade' to your actual property name!
+
+    class Meta:
+        model = Enrollment
+        fields = ['id', 'code', 'title', 'percentage', 'grade']
+
+class StudentProfileSerializer(serializers.ModelSerializer):
+    user = BaseUserSerializer(read_only=True)
+    discipline = DisciplineSerializer(read_only=True)
+    cumulative_gpa = serializers.ReadOnlyField(source='calculated_gpa')
+    
+    top_courses = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentProfile
+        fields = ['id', 'user', 'discipline', 'enrollment_year', 'cumulative_gpa', 'top_courses']
+    def get_top_courses(self, obj):
+        # Let the database do the sorting and slicing!
+        top_enrollments = Enrollment.objects.filter(
+            student=obj
+        ).select_related(
+            'course_class__course'
+        ).order_by(
+            # Sort descending, but force NULL (active courses) to the bottom
+            F('final_percentage').desc(nulls_last=True)
+        )[:5] # The slice translates to a SQL "LIMIT 5"
+
+        return TopCourseEnrollmentSerializer(top_enrollments, many=True).data
+
+class RegisterSerializer(serializers.ModelSerializer):
+    password  = serializers.CharField(write_only=True, validators=[validate_password])
+    password2 = serializers.CharField(write_only=True, label="Confirm password")
+
+    class Meta:
+        model  = BaseUser
+        fields = ["email", "first_name", "last_name", "role", "password", "password2"]
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs.pop("password2"):
+            raise serializers.ValidationError({"password": "Passwords do not match."})
+        return attrs
+
+    def validate_role(self, value):
+        # Admins should not be self-registerable
+        if value == BaseUser.Role.ADMIN:
+            raise serializers.ValidationError("Cannot register with the Admin role.")
+        return value
+
+    def create(self, validated_data):
+        user = BaseUser.objects.create_user(**validated_data)
+        # Auto-create the appropriate profile shell so FKs never dangle
+        if user.role == BaseUser.Role.TEACHER:
+            TeacherProfile.objects.create(user=user, rank=TeacherProfile.Rank.TA)
+        elif user.role == BaseUser.Role.STUDENT:
+            StudentProfile.objects.create(user=user, enrollment_year=__import__('datetime').date.today().year)
+        return user
+    
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        
+        # Add whatever you want into the JWT payload
+        token['role'] = user.role
+        
+        if user.role == 'STUDENT':
+            sp = StudentProfile.objects.filter(user=user).first()
+            token['profile_id'] = sp.id if sp else None
+        elif user.role == 'TEACHER':
+            tp = TeacherProfile.objects.filter(user=user).first()
+            token['profile_id'] = tp.id if tp else None
+        else:
+            token['profile_id'] = None
+            
+        return token
+</file>
+
+<file path="users/models.py">
+from decimal import Decimal
+from django.db import models
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin, UserManager
+from django.utils import timezone
+
+# 1. The Custom Manager (The Filter)
+class ActiveManager(models.Manager):
+    def get_queryset(self):
+        # Automatically hides any row where is_active is False
+        return super().get_queryset().filter(is_active=True)
+
+# 2. The Abstract Base Model (The Blueprint)
+class SoftDeleteModel(models.Model):
+    is_active = models.BooleanField(default=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True  # Tells Django NOT to create a separate database table for this
+
+    def delete(self, *args, **kwargs):
+        """The Soft Delete: flips the boolean instead of erasing the row."""
+        self.is_active = False
+        self.deleted_at = timezone.now()
+        self.save()
+
+    def hard_delete(self, *args, **kwargs):
+        """The Permanent Delete: bypasses the soft delete completely."""
+        super().delete(*args, **kwargs)
+
+class TimestampedModel(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+
+class ActiveUserManager(UserManager):
+    def get_queryset(self):
+        return super().get_queryset().filter(is_active=True)
+
+
+
+class BaseUserManager_(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError("Email is required.")
+        email = self.normalize_email(email)
+        user  = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        extra_fields.setdefault("role", BaseUser.Role.ADMIN)
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        return self.create_user(email, password, **extra_fields)
+
+
+class BaseUser(AbstractBaseUser, PermissionsMixin, TimestampedModel):
+    class Role(models.TextChoices):
+        ADMIN   = "ADMIN",   "Admin"
+        TEACHER = "TEACHER", "Teacher"
+        STUDENT = "STUDENT", "Student"
+
+    email      = models.EmailField(unique=True)
+    first_name = models.CharField(max_length=150)
+    last_name  = models.CharField(max_length=150)
+    role       = models.CharField(max_length=10, choices=Role.choices)
+    is_active  = models.BooleanField(default=True)
+    is_staff   = models.BooleanField(default=False)
+
+    USERNAME_FIELD  = "email"
+    REQUIRED_FIELDS = ["first_name", "last_name", "role"]
+
+    objects = ActiveUserManager()
+    all_objects = UserManager()
+    
+
+    def delete(self, *args, **kwargs):
+        """
+        MVP Soft Delete: Instantly kills all active JWTs by setting the user to inactive.
+        """
+        self.is_active = False
+        self.save()
+
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}"
+
+    def __str__(self):
+        return f"{self.full_name} <{self.email}>"
+
+
+class TeacherProfile(TimestampedModel, SoftDeleteModel):
+    class Rank(models.TextChoices):
+        TA         = "TA",         "Teaching Assistant"
+        LECTURER   = "LECTURER",   "Lecturer"
+        ASST_PROF  = "ASST_PROF",  "Assistant Professor"
+        ASSOC_PROF = "ASSOC_PROF", "Associate Professor"
+        PROFESSOR  = "PROFESSOR",  "Professor"
+
+    user       = models.OneToOneField(BaseUser, on_delete=models.CASCADE, related_name="teacher_profile")
+    department = models.ForeignKey(
+        "academics.Department",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="teachers",
+    )
+    rank       = models.CharField(max_length=20, choices=Rank.choices)
+
+    objects = ActiveManager()
+    all_objects = models.Manager()
+    
+    def __str__(self):
+        return f"{self.user.full_name} ({self.get_rank_display()})"
+
+
+class StudentProfile(TimestampedModel, SoftDeleteModel):
+    user            = models.OneToOneField(BaseUser, on_delete=models.CASCADE, related_name="student_profile")
+    discipline      = models.ForeignKey(
+        "academics.Discipline",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="students",
+    )
+    enrollment_year = models.PositiveIntegerField()
+    cumulative_gpa  = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+
+    objects = ActiveManager()   
+    all_objects = models.Manager()
+
+    @property
+    def calculated_gpa(self) -> Decimal:
+        """
+        Calculates the true cumulative GPA weighted by course credits.
+        """
+        # Fetch all enrollments for this student, joining the course to get credits
+        enrollments = self.enrollments.select_related('course_class__course')
+        
+        total_quality_points = Decimal('0.00')
+        total_credits = 0
+
+        for enr in enrollments:
+            # FIX: Only include courses that have officially been assigned grade points (Completed courses)
+            if enr.course_grade_points is not None:
+                credits = enr.course_class.course.credits
+                total_quality_points += Decimal(str(enr.course_grade_points)) * credits
+                total_credits += credits
+
+        if total_credits == 0:
+            return Decimal('0.00')
+            
+        return round(total_quality_points / total_credits, 2)
+    
+    def __str__(self):
+        return f"{self.user.full_name} — {self.discipline}"
+</file>
+
+<file path="scheduling/api/urls.py">
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from scheduling.api.views import SessionViewSet, TimeslotViewSet, ScheduleSessionViewSet
+
+router = DefaultRouter()
+router.register(r"timeslots", TimeslotViewSet, basename="timeslot")
+router.register(r"schedule-sessions", ScheduleSessionViewSet, basename="schedule-session")
+
+
+urlpatterns = [
+    path("", include(router.urls)),     
+]
+</file>
+
+<file path="academics/api/urls.py">
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from academics.api.views import CourseClassViewSet, CourseViewSet, DepartmentViewSet, DisciplineViewSet, RoomViewSet, StudyGroupViewSet, TermViewSet 
+
+
+router = DefaultRouter()
+
+router.register(r"departments", DepartmentViewSet, basename="department")
+router.register(r"disciplines", DisciplineViewSet, basename="discipline")
+router.register(r"terms", TermViewSet, basename="term")
+router.register(r"courses", CourseViewSet, basename="course")   
+router.register(r"rooms", RoomViewSet, basename="room")
+router.register(r"groups", StudyGroupViewSet, basename="group")
+router.register(r"classes", CourseClassViewSet, basename="class")
+
+urlpatterns = [
+    path("", include(router.urls)),     
+]
+</file>
+
+<file path="scheduling/api/views.py">
+from rest_framework import viewsets
+from scheduling.models import Session, Timeslot
+from .serializers import SessionSerializer , TimeslotSerializer, ScheduleSessionSerializer
+from django_filters.rest_framework import DjangoFilterBackend
+from .permissions import IsAdminOrReadOnly
+
+class SessionViewSet(viewsets.ModelViewSet):
+    serializer_class = SessionSerializer
+
+    def get_queryset(self):
+        queryset = Session.objects.select_related('room', 'timeslot', 'course_class__course')
+        student_id = self.request.query_params.get('student')
+        
+        if student_id:
+            # We follow the chain: Session -> CourseClass -> Enrollment -> Student
+            return queryset.filter(course_class__enrollments__student_id=student_id)
+        return queryset
+
+class TimeslotViewSet(viewsets.ModelViewSet):
+    queryset = Timeslot.objects.all()
+    serializer_class = TimeslotSerializer
+
+class ScheduleSessionViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = ScheduleSessionSerializer
+
+    def get_queryset(self):
+        # 1. Filter for the active term
+        queryset = Session.objects.filter(
+            course_class__group__term__is_active=True
+        ).select_related('room', 'timeslot', 'course_class__course')
+        
+        # 2. Filter for the specific student 
+        # (Assuming the frontend passes ?student=4, like in the main SessionViewSet)
+        student_id = self.request.query_params.get('student')
+        
+        if student_id:
+            queryset = queryset.filter(course_class__enrollments__student_id=student_id)
+        else:
+            # Best practice: fallback to the logged-in user if no ID is provided
+            # queryset = queryset.filter(course_class__enrollments__student__user=self.request.user)
+            pass
+            
+        return queryset
+</file>
+
+<file path="academics/api/serializers.py">
+from rest_framework import serializers
+from academics.models import Department, Discipline, Term, Course, Room, StudyGroup, CourseClass
+
+
+class DepartmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Department
+        fields = ["id", "name", "code", "created_at", "updated_at"]
+
+
+class DisciplineSerializer(serializers.ModelSerializer):
+    department = DepartmentSerializer(read_only=True)
+
+    class Meta:
+        model  = Discipline
+        fields = ["id", "name", "code", "department", "program_type", "created_at", "updated_at"]
+
+
+class TermSerializer(serializers.ModelSerializer):
+    class Meta:
+        model            = Term
+        fields           = ["id", "name", "start_date", "end_date", "is_active", "created_at", "updated_at"]
+        read_only_fields = ["is_active"]
+
+
+class CourseSerializer(serializers.ModelSerializer):
+    department = DepartmentSerializer(read_only=True)
+    
+    class Meta:
+        model  = Course
+        fields = ["id", "code", "title", "credits", "course_type", "department", "created_at", "updated_at"]
+
+
+class RoomSerializer(serializers.ModelSerializer):
+    department = DepartmentSerializer(read_only=True)
+
+    class Meta:
+        model  = Room
+        fields = ["id", "code", "name", "capacity", "room_type", "department", "is_active", "created_at", "updated_at"]
+
+
+class StudyGroupSerializer(serializers.ModelSerializer):
+    discipline = DisciplineSerializer(read_only=True)
+    term       = TermSerializer(read_only=True)
+
+    class Meta:
+        model  = StudyGroup
+        fields = ["id", "discipline", "term", "year_level", "number", "created_at", "updated_at"]
+
+
+class CourseClassSerializer(serializers.ModelSerializer):
+    course = CourseSerializer(read_only=True)
+    group = StudyGroupSerializer(read_only=True)
+
+    class Meta:
+        model  = CourseClass
+        fields = [
+            "id",
+            "course", 
+            "group",  
+            "created_at", 
+            "updated_at",
+        ]
+</file>
+
+<file path="records/api/urls.py">
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import AssignmentViewSet, AttendanceViewSet, EnrollmentViewSet, ExamResultViewSet, ExamViewSet, GradeEntryViewSet, StudentSubmissionViewSet
+
+router = DefaultRouter()
+router.register(r'enrollments', EnrollmentViewSet, basename='enrollment')
+router.register(r'grades', GradeEntryViewSet, basename='gradeentry')
+router.register(r'attendance', AttendanceViewSet, basename='attendancerecord')
+router.register(r'exams', ExamViewSet, basename='exam')
+router.register(r'exam-results', ExamResultViewSet, basename='examresult')      
+router.register(r'assignments', AssignmentViewSet, basename='assignment')
+router.register(r'student-submissions', StudentSubmissionViewSet, basename='studentsubmission')
+urlpatterns = [
+    path('', include(router.urls)),
+]
+</file>
+
+<file path="users/api/views.py">
+from datetime import timedelta
+
+from django.conf import settings
+from rest_framework import status, viewsets
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from users.models import BaseUser, StudentProfile, TeacherProfile
+
+from .serializers import (
+    BaseUserSerializer,
+    CustomTokenObtainPairSerializer,
+    RegisterSerializer,
+    StudentProfileSerializer,
+    TeacherProfileSerializer,
+)
+
+# ─────────────────────────────────────────────────────────────────────
+# Cookie configuration
+# ─────────────────────────────────────────────────────────────────────
+# Both tokens live in HttpOnly cookies; JS never touches them.
+# SameSite=Strict blocks CSRF for same-site SPAs without needing CSRF tokens.
+# The refresh cookie is path-scoped to /api/auth/ — it is only attached to
+# refresh and logout, never on regular API calls.
+
+ACCESS_COOKIE_NAME  = 'access_token'
+REFRESH_COOKIE_NAME = 'refresh_token'
+
+ACCESS_COOKIE_MAX_AGE = int(
+    settings.SIMPLE_JWT.get('ACCESS_TOKEN_LIFETIME', timedelta(minutes=15)).total_seconds()
+)
+REFRESH_COOKIE_MAX_AGE = int(
+    settings.SIMPLE_JWT.get('REFRESH_TOKEN_LIFETIME', timedelta(days=7)).total_seconds()
+)
+
+
+def _cookie_kwargs(max_age: int, path: str = '/') -> dict:
+    return {
+        'httponly': True,
+        'secure':   not settings.DEBUG,   # HTTPS-only in production
+        'samesite': 'Strict',             # blocks CSRF for same-site SPA
+        'max_age':  max_age,
+        'path':     path,
+    }
+
+
+def set_access_cookie(response, access_token):
+    response.set_cookie(
+        ACCESS_COOKIE_NAME,
+        str(access_token),
+        **_cookie_kwargs(ACCESS_COOKIE_MAX_AGE, path='/'),
+    )
+    return response
+
+
+def set_refresh_cookie(response, refresh_token):
+    # Path-scoped: never sent on regular /api/* calls
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        str(refresh_token),
+        **_cookie_kwargs(REFRESH_COOKIE_MAX_AGE, path='/api/auth/'),
+    )
+    return response
+
+
+def set_auth_cookies(response, refresh):
+    set_access_cookie(response, refresh.access_token)
+    set_refresh_cookie(response, refresh)
+    return response
+
+
+def clear_auth_cookies(response):
+    response.delete_cookie(ACCESS_COOKIE_NAME,  path='/')
+    response.delete_cookie(REFRESH_COOKIE_NAME, path='/api/auth/')
+    return response
+
+
+class BaseUserViewSet(viewsets.ModelViewSet):
+    queryset = BaseUser.objects.all()
+    serializer_class = BaseUserSerializer
+
+
+class TeacherProfileViewSet(viewsets.ModelViewSet):
+    queryset = TeacherProfile.objects.all()
+    serializer_class = TeacherProfileSerializer
+
+
+class StudentProfileViewSet(viewsets.ModelViewSet):
+    queryset = StudentProfile.objects.all()
+    serializer_class = StudentProfileSerializer
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 1. Registration
+# ─────────────────────────────────────────────────────────────────────
+
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        user = serializer.save()
+        refresh = CustomTokenObtainPairSerializer.get_token(user)
+
+        response = Response(
+            {
+                'message': 'Registration successful.',
+                'user':    BaseUserSerializer(user).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+        return set_auth_cookies(response, refresh)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 2. Login
+# ─────────────────────────────────────────────────────────────────────
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        if response.status_code != 200:
+            return response
+
+        access_token  = response.data.get('access')
+        refresh_token = response.data.get('refresh')
+
+        # Strip both tokens from the body — they live in cookies now
+        response.data = {'message': 'Login successful.'}
+
+        set_access_cookie(response, access_token)
+        set_refresh_cookie(response, refresh_token)
+        return response
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 3. Refresh
+# ─────────────────────────────────────────────────────────────────────
+
+class CustomTokenRefreshView(TokenRefreshView):
+    def post(self, request, *args, **kwargs):
+        refresh_token = request.COOKIES.get(REFRESH_COOKIE_NAME)
+        if not refresh_token:
+            raise InvalidToken('No refresh token cookie found.')
+
+        # SimpleJWT expects request.data['refresh']
+        request.data['refresh'] = refresh_token
+
+        response = super().post(request, *args, **kwargs)
+        if response.status_code != 200:
+            return response
+
+        new_access  = response.data.get('access')
+        new_refresh = response.data.get('refresh')   # only if ROTATE_REFRESH_TOKENS
+
+        response.data = {'message': 'Token refreshed.'}
+
+        set_access_cookie(response, new_access)
+        if new_refresh:
+            set_refresh_cookie(response, new_refresh)
+        return response
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 4. Logout
+# ─────────────────────────────────────────────────────────────────────
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        refresh_token = request.COOKIES.get(REFRESH_COOKIE_NAME)
+
+        response = Response({'message': 'Logged out.'}, status=status.HTTP_200_OK)
+        clear_auth_cookies(response)
+
+        if refresh_token:
+            try:
+                RefreshToken(refresh_token).blacklist()
+            except TokenError:
+                pass  # already invalid; cookies are gone, that's enough
+
+        return response
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 5. Me — current user info
+# ─────────────────────────────────────────────────────────────────────
+
+class MeView(APIView):
+    """
+    Returns the currently authenticated user.
+    Frontend calls this on mount to ask "am I logged in, and as whom?"
+    Since the JWT lives in an HttpOnly cookie, JS cannot decode it itself.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        data = BaseUserSerializer(user).data
+
+        if user.role == BaseUser.Role.STUDENT:
+            sp = StudentProfile.objects.filter(user=user).first()
+            data['profile_id'] = sp.id if sp else None
+        elif user.role == BaseUser.Role.TEACHER:
+            tp = TeacherProfile.objects.filter(user=user).first()
+            data['profile_id'] = tp.id if tp else None
+        else:
+            data['profile_id'] = None
+
+        return Response(data)
+</file>
+
+<file path="academics/api/views.py">
+from rest_framework import viewsets
+from academics.api.permissions import IsAdminOrReadOnly
+from academics.models import Department, Discipline, StudyGroup, Term, Course, Room, CourseClass
+from .serializers import CourseSerializer, DepartmentSerializer, DisciplineSerializer, TermSerializer, RoomSerializer, StudyGroupSerializer, CourseClassSerializer
+
+class DepartmentViewSet(viewsets.ModelViewSet):
+    queryset = Department.objects.all()
+    serializer_class = DepartmentSerializer
+   
+
+class DisciplineViewSet(viewsets.ModelViewSet):
+    queryset = Discipline.objects.all()
+    serializer_class = DisciplineSerializer
+    
+
+class TermViewSet(viewsets.ModelViewSet):
+    queryset = Term.objects.all()
+    serializer_class = TermSerializer
+
+
+class CourseViewSet(viewsets.ModelViewSet):
+    queryset = Course.objects.all()
+    serializer_class = CourseSerializer
+
+class RoomViewSet(viewsets.ModelViewSet):   
+    queryset = Room.objects.all()
+    serializer_class = RoomSerializer
+  
+
+class StudyGroupViewSet(viewsets.ModelViewSet):
+    queryset = StudyGroup.objects.all()
+    serializer_class = StudyGroupSerializer
+   
+
+class CourseClassViewSet(viewsets.ModelViewSet):
+    queryset = CourseClass.objects.all()
+    serializer_class = CourseClassSerializer
+</file>
+
+<file path="records/api/serializers.py">
+import statistics
+from rest_framework import serializers
+from academics.api.serializers import CourseClassSerializer
+from records.models import (
+    Enrollment, GradeEntry, AttendanceRecord,
+    Exam, ExamResult, Assignment, StudentSubmission,
+)
+
+
+# ─────────────────────────────────────────────────────────────
+# GradeEntry
+# ─────────────────────────────────────────────────────────────
+
+class GradeEntrySerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = GradeEntry
+        fields = [
+            "id", "enrollment", "component", "score",
+            "created_at", "updated_at",
+        ]
+
+
+# ─────────────────────────────────────────────────────────────
+# Enrollment
+# ─────────────────────────────────────────────────────────────
+
+class DashboardFilterSerializer(serializers.Serializer):
+    student = serializers.IntegerField(required=True)
+    
+    #No hidden defaults injected behind your back.
+    term_status = serializers.ChoiceField(
+        choices=['past', 'all', 'active'],
+        required=False 
+    )
+
+class DashboardEnrollmentSerializer(serializers.ModelSerializer):
+    # Flatten the relationship: Reach through Enrollment -> CourseClass -> Course
+    course_code = serializers.CharField(
+        source='course_class.course.code', 
+        read_only=True
+    )
+    course_title = serializers.CharField(
+        source='course_class.course.title', 
+        read_only=True
+    )
+
+    class Meta:
+        model = Enrollment
+        fields = [
+            'id',             
+            'course_code',    # Matches the "CODE" column
+            'course_title'    # Matches the "COURSE TITLE" column
+        ]    
+
+import statistics
+from django.db.models import Avg, Max, Min, Count, Q
+from rest_framework import serializers
+# ... [Keep your other imports and serializers] ...
+
+class EnrollmentSerializer(serializers.ModelSerializer):
+    course_class        = CourseClassSerializer(read_only=True)
+    grades              = GradeEntrySerializer(many=True, read_only=True)
+    
+    # We keep these ReadOnly so clients can't manually set them via API, 
+    # but they now map directly to the DB columns.
+    final_percentage    = serializers.ReadOnlyField()
+    course_grade_points = serializers.ReadOnlyField()
+    cohort_stats        = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = Enrollment
+        fields = [
+            "id", "student", "course_class",
+            "lecture_session", "tutorial_session", "lab_session",
+            "grades", "final_percentage", "course_grade_points",
+            "cohort_stats",
+            "created_at", "updated_at",
+        ]
+
+    def get_cohort_stats(self, obj):
+        # Only look at peer enrollments that have at least one grade
+        peer_enrollments = Enrollment.objects.filter(
+            course_class=obj.course_class,
+            grades__isnull=False
+        ).distinct()
+
+        # Let the database do the heavy lifting for averages, max, min, and distribution
+        stats = peer_enrollments.aggregate(
+            avg=Avg('final_percentage'),
+            max=Max('final_percentage'),
+            min=Min('final_percentage'),
+            total=Count('id'),
+            # Database-level distribution counts
+            A=Count('id', filter=Q(final_percentage__gte=93)),
+            A_minus=Count('id', filter=Q(final_percentage__gte=89, final_percentage__lt=93)),
+            B_plus=Count('id', filter=Q(final_percentage__gte=84, final_percentage__lt=89)),
+            B=Count('id', filter=Q(final_percentage__gte=79, final_percentage__lt=84)),
+            C_plus=Count('id', filter=Q(final_percentage__gte=74, final_percentage__lt=79)),
+            C=Count('id', filter=Q(final_percentage__gte=69, final_percentage__lt=74)),
+            D_plus=Count('id', filter=Q(final_percentage__gte=64, final_percentage__lt=69)),
+            D=Count('id', filter=Q(final_percentage__gte=60, final_percentage__lt=64)),
+            F=Count('id', filter=Q(final_percentage__lt=60)),
+        )
+
+        if stats['total'] == 0:
+            return None
+
+        # Standard SQL doesn't have a reliable Median function cross-platform.
+        # We fetch a flat, lightweight list of just the decimals to calculate it in Python.
+        percentages = list(peer_enrollments.values_list('final_percentage', flat=True))
+        median_val = statistics.median([float(p) for p in percentages])
+
+        return {
+            "average":        round(float(stats['avg']), 1),
+            "median":         round(median_val, 1),
+            "highest":        float(stats['max']),
+            "lowest":         float(stats['min']),
+            "total_students": stats['total'],
+            "distribution": {
+                "A":  stats['A'],
+                "A-": stats['A_minus'],
+                "B+": stats['B_plus'],
+                "B":  stats['B'],
+                "C+": stats['C_plus'],
+                "C":  stats['C'],
+                "D+": stats['D_plus'],
+                "D":  stats['D'],
+                "F":  stats['F'],
+            },
+        }
+
+
+# ─────────────────────────────────────────────────────────────
+# AttendanceRecord
+# ─────────────────────────────────────────────────────────────
+
+class AttendanceRecordSerializer(serializers.ModelSerializer):
+    course_code  = serializers.CharField(
+        source="session.course_class.course.code",
+        read_only=True,
+    )
+    course_title = serializers.CharField(
+        source="session.course_class.course.title",
+        read_only=True,
+    )
+    session_type = serializers.CharField(
+        source="session.session_type",
+        read_only=True,
+    )
+
+    term_name = serializers.CharField(
+        source="session.course_class.group.term.name",
+        read_only=True,
+    )
+
+    class Meta:
+        model  = AttendanceRecord
+        fields = [
+            "id", "student", "session",
+            "term_name",
+            "course_code", "course_title", "session_type",
+            "week", "status",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+
+# ─────────────────────────────────────────────────────────────
+# Exam
+# ─────────────────────────────────────────────────────────────
+
+class ExamSerializer(serializers.ModelSerializer):
+    course_code  = serializers.CharField(
+        source="course_class.course.code",
+        read_only=True,
+    )
+    course_title = serializers.CharField(
+        source="course_class.course.title",
+        read_only=True,
+    )
+
+    class Meta:
+        model  = Exam
+        fields = [
+            "id", "course_class", "course_code", "course_title",
+            "exam_type", "week", "max_score",
+            "created_at", "updated_at",
+        ]
+
+
+# ─────────────────────────────────────────────────────────────
+# ExamResult
+# ─────────────────────────────────────────────────────────────
+
+class ExamResultSerializer(serializers.ModelSerializer):
+    exam_type  = serializers.CharField(source="exam.exam_type",  read_only=True)
+    exam_week  = serializers.IntegerField(source="exam.week",    read_only=True)
+    max_score  = serializers.DecimalField(
+        source="exam.max_score",
+        max_digits=5, decimal_places=2,
+        read_only=True,
+    )
+    course_code  = serializers.CharField(
+        source="exam.course_class.course.code",
+        read_only=True,
+    )
+    course_title = serializers.CharField(
+        source="exam.course_class.course.title",
+        read_only=True,
+    )
+
+    class Meta:
+        model  = ExamResult
+        fields = [
+            "id", "exam", "student",
+            "course_code", "course_title",
+            "exam_type", "exam_week", "max_score",
+            "status", "score",
+            "created_at", "updated_at",
+        ]
+
+
+# ─────────────────────────────────────────────────────────────
+# Assignment
+# ─────────────────────────────────────────────────────────────
+
+class AssignmentSerializer(serializers.ModelSerializer):
+    course_code  = serializers.CharField(
+        source="course_class.course.code",
+        read_only=True,
+    )
+    course_title = serializers.CharField(
+        source="course_class.course.title",
+        read_only=True,
+    )
+
+    class Meta:
+        model  = Assignment
+        fields = [
+            "id", "course_class", "course_code", "course_title",
+            "assignment_type", "due_week", "max_points",
+            "created_at", "updated_at",
+        ]
+
+
+# ─────────────────────────────────────────────────────────────
+# StudentSubmission
+# ─────────────────────────────────────────────────────────────
+
+class StudentSubmissionSerializer(serializers.ModelSerializer):
+    is_late      = serializers.ReadOnlyField()
+    assignment_type = serializers.CharField(
+        source="assignment.assignment_type",
+        read_only=True,
+    )
+    due_week     = serializers.IntegerField(source="assignment.due_week", read_only=True)
+    max_points   = serializers.DecimalField(
+        source="assignment.max_points",
+        max_digits=5, decimal_places=2,
+        read_only=True,
+    )
+    course_code  = serializers.CharField(
+        source="assignment.course_class.course.code",
+        read_only=True,
+    )
+    course_title = serializers.CharField(
+        source="assignment.course_class.course.title",
+        read_only=True,
+    )
+
+    class Meta:
+        model  = StudentSubmission
+        fields = [
+            "id", "student", "assignment",
+            "course_code", "course_title",
+            "assignment_type", "due_week", "max_points",
+            "score", "submitted_at", "is_late",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["submitted_at", "created_at", "updated_at"]
+</file>
+
+<file path="scheduling/models.py">
+from django.db import models
+from django.core.exceptions import ValidationError
+
+from academics.models import TimestampedModel
+
+
+# ─────────────────────────────────────────────────────────────
+# Timeslot
+# ─────────────────────────────────────────────────────────────
+
+class Timeslot(TimestampedModel):
+
+    class Day(models.IntegerChoices):
+        SATURDAY  = 0, "Saturday"
+        SUNDAY    = 1, "Sunday"
+        MONDAY    = 2, "Monday"
+        TUESDAY   = 3, "Tuesday"
+        WEDNESDAY = 4, "Wednesday"
+        THURSDAY  = 5, "Thursday"
+
+    class Period(models.IntegerChoices):
+        PERIOD_1 = 1, "08:00 – 09:30"
+        PERIOD_2 = 2, "09:45 – 11:15"
+        PERIOD_3 = 3, "11:30 – 13:00"
+        PERIOD_4 = 4, "13:30 – 15:00"
+        PERIOD_5 = 5, "15:15 – 16:45"
+
+    day    = models.IntegerField(choices=Day.choices)
+    period = models.IntegerField(choices=Period.choices)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["day", "period"],
+                name="unique_timeslot",
+            )
+        ]
+        ordering = ["day", "period"]
+
+    def __str__(self):
+        return f"{self.get_day_display()} / {self.get_period_display()}"
+
+
+# ─────────────────────────────────────────────────────────────
+# Session
+# ─────────────────────────────────────────────────────────────
+
+class Session(TimestampedModel):
+
+    class SessionType(models.TextChoices):
+        LECTURE  = "LECTURE",  "Lecture"
+        LAB      = "LAB",      "Lab"
+        TUTORIAL = "TUTORIAL", "Tutorial"
+
+    # Session type -> allowed room types. Defined once, not rebuilt per call.
+    ALLOWED_ROOM_TYPES = {
+        SessionType.LAB: ["LAB"],
+        SessionType.LECTURE: ["LECTURE"],
+        SessionType.TUTORIAL: ["TUTORIAL"],
+    }
+
+    course_class = models.ForeignKey(
+        "academics.CourseClass",
+        on_delete=models.CASCADE,
+        related_name="sessions",
+    )
+    room         = models.ForeignKey(
+        "academics.Room",
+        on_delete=models.PROTECT,
+        related_name="sessions",
+    )
+    timeslot     = models.ForeignKey(
+        Timeslot,
+        on_delete=models.PROTECT,
+        related_name="sessions",
+    )
+    session_type = models.CharField(
+        max_length=10,
+        choices=SessionType.choices,
+        default=SessionType.LECTURE,
+    )
+
+    def clean(self):
+        errors = {}
+
+        if self.room_id and self.session_type:
+            room_type = self.room.room_type
+            valid_room_types = self.ALLOWED_ROOM_TYPES.get(self.session_type, [])
+
+            if room_type not in valid_room_types:
+                valid_types_str = " or ".join(valid_room_types).lower()
+                errors["room"] = (
+                    f"{self.get_session_type_display()} sessions must be assigned "
+                    f"to a {valid_types_str} room. You selected a {room_type} room."
+                )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return (
+            f"{self.course_class} / "
+            f"{self.session_type} / "
+            f"{self.timeslot} / "
+            f"{self.room.code}"
+        )
+</file>
+
+<file path="records/api/views.py">
+from rest_framework import viewsets
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import OrderingFilter
+from .permissions import IsAdminOrReadOnly
+from records.models import Enrollment, GradeEntry, AttendanceRecord, Exam, ExamResult, Assignment, StudentSubmission
+from .serializers import EnrollmentSerializer, GradeEntrySerializer, AttendanceRecordSerializer, ExamSerializer, ExamResultSerializer, AssignmentSerializer, StudentSubmissionSerializer, DashboardEnrollmentSerializer, DashboardFilterSerializer
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+
+class EnrollmentViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Enrollments to be viewed or edited.
+    """
+    serializer_class = EnrollmentSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    
+    filterset_fields = ['student', 'course_class']
+    ordering_fields = ['created_at']
+
+    def get_queryset(self):
+        queryset = Enrollment.objects.select_related(
+            'student', 
+            'course_class'
+        ).prefetch_related(
+            'grades'
+        )
+
+        term_status = self.request.query_params.get('term_status')
+
+        if term_status == 'past':
+            # For the Grades sidebar: /api/enrollments/?student=4&term_status=past
+            queryset = queryset.filter(course_class__group__term__is_active=False)
+            
+        elif term_status == 'all':
+            # /api/enrollments/?student=4&term_status=all
+            pass 
+            
+        else:
+            # /api/enrollments/?student=4
+            queryset = queryset.filter(course_class__group__term__is_active=True)
+
+        return queryset
+
+    
+    @action(detail=False, methods=['get'], url_path='dashboard-summary')
+    def dashboard_summary(self, request):
+        
+        param_serializer = DashboardFilterSerializer(data=request.query_params)
+        param_serializer.is_valid(raise_exception=True)
+        
+        # Safely extract variables
+        student_id = param_serializer.validated_data['student']
+        
+        # Use .get() because term_status might be missing
+        term_status = param_serializer.validated_data.get('term_status')
+
+        # Base queryset
+        queryset = Enrollment.objects.filter(
+            student_id=student_id
+        ).select_related(
+            'student', 
+            'course_class__course'
+        )
+
+        # Explicit business logic
+        if term_status == 'past':
+            queryset = queryset.filter(course_class__group__term__is_active=False)
+            
+        elif term_status == 'all':
+            pass # Return all enrollments in history
+            
+        else:
+            # It catches term_status == 'active' AND term_status == None
+            queryset = queryset.filter(course_class__group__term__is_active=True)
+
+        serializer = DashboardEnrollmentSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class GradeEntryViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows Grade Entries to be viewed or edited.
+    """
+    serializer_class = GradeEntrySerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    
+    # Allows fetching /api/grades/?enrollment=3
+    filterset_fields = ['enrollment']
+    ordering_fields = ['created_at', 'score']
+
+
+    def get_queryset(self):
+        return GradeEntry.objects.all().select_related('enrollment')
+    
+
+class AttendanceViewSet(viewsets.ModelViewSet):
+    serializer_class = AttendanceRecordSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["student", "session"]
+
+    def get_queryset(self):
+        queryset = AttendanceRecord.objects.select_related(
+            "session__course_class__course",
+        )
+        
+        term_status = self.request.query_params.get("term_status")
+        student_id = self.request.query_params.get("student")
+
+        if term_status == "active":
+            queryset = queryset.filter(session__course_class__group__term__is_active=True)
+        elif term_status == "past":
+            queryset = queryset.filter(session__course_class__group__term__is_active=False)
+
+        if student_id:
+            queryset = queryset.filter(student_id=student_id)
+
+        return queryset
+    
+
+class ExamViewSet(viewsets.ModelViewSet):
+    serializer_class = ExamSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["course_class", "exam_type"]
+
+    def get_queryset(self):
+        queryset = Exam.objects.select_related("course_class__course")
+        
+        term_status = self.request.query_params.get("term_status")
+        student_id = self.request.query_params.get("student") # <-- Catch the student ID
+
+        # 1. Filter by term
+        if term_status == "active":
+            queryset = queryset.filter(course_class__group__term__is_active=True)
+        elif term_status == "past":
+            queryset = queryset.filter(course_class__group__term__is_active=False)
+            
+        # 2. Filter by enrolled student
+        if student_id:
+            queryset = queryset.filter(course_class__enrollments__student_id=student_id)
+
+        return queryset
+
+
+class AssignmentViewSet(viewsets.ModelViewSet):
+    serializer_class = AssignmentSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["course_class", "assignment_type"]
+
+    def get_queryset(self):
+        queryset = Assignment.objects.select_related("course_class__course")
+        
+        term_status = self.request.query_params.get("term_status")
+        student_id = self.request.query_params.get("student") # <-- Catch the student ID
+
+        # 1. Filter by term
+        if term_status == "active":
+            queryset = queryset.filter(course_class__group__term__is_active=True)
+        elif term_status == "past":
+            queryset = queryset.filter(course_class__group__term__is_active=False)
+            
+        # 2. Filter by enrolled student
+        if student_id:
+            queryset = queryset.filter(course_class__enrollments__student_id=student_id)
+
+        return queryset
+    
+
+class ExamResultViewSet(viewsets.ModelViewSet):
+    serializer_class = ExamResultSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["student", "exam"]
+
+    def get_queryset(self):
+        return ExamResult.objects.select_related(
+            "exam__course_class__course",
+        )
+
+
+class StudentSubmissionViewSet(viewsets.ModelViewSet):
+    serializer_class = StudentSubmissionSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["student", "assignment"]
+
+    def get_queryset(self):
+        return StudentSubmission.objects.select_related(
+            "assignment__course_class__course",
+        )
+</file>
+
+<file path="academics/models.py">
+from django.db import models
+from django.core.exceptions import ValidationError
+from django.utils import timezone
+from users.models import TimestampedModel, SoftDeleteModel, ActiveManager
+
+# ─────────────────────────────────────────────────────────────
+# Abstract base
+# ─────────────────────────────────────────────────────────────
+
+
+
+# ─────────────────────────────────────────────────────────────
+# Department
+# ─────────────────────────────────────────────────────────────
+
+class Department(TimestampedModel):
+    code = models.CharField(max_length=10, unique=True)
+    name = models.CharField(max_length=200)
+
+    def __str__(self):
+        return f"{self.code} — {self.name}"
+
+
+# ─────────────────────────────────────────────────────────────
+# Discipline
+# ─────────────────────────────────────────────────────────────
+
+class Discipline(TimestampedModel):
+
+    class ProgramType(models.TextChoices):
+        GSP = "GSP", "General Specialization Program"
+        SSP = "SSP", "Specific Specialization Program"
+
+    code         = models.CharField(max_length=20, unique=True)
+    name         = models.CharField(max_length=200)
+    program_type = models.CharField(max_length=10, choices=ProgramType.choices)
+    department   = models.OneToOneField(
+        Department,
+        on_delete=models.PROTECT,
+        related_name="discipline",
+    )
+
+    def __str__(self):
+        
+        return f"{self.code} ({self.program_type})"
+# ─────────────────────────────────────────────────────────────
+# Term
+# ─────────────────────────────────────────────────────────────
+
+
+class Term(TimestampedModel):
+    name       = models.CharField(max_length=100, unique=True)
+    start_date = models.DateField()
+    end_date   = models.DateField()
+    is_active  = models.BooleanField(default=False)
+
+    def save(self, *args, **kwargs):
+        if self.is_active:
+            Term.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+# ─────────────────────────────────────────────────────────────
+# Course
+# ─────────────────────────────────────────────────────────────
+
+class Course(TimestampedModel):
+
+    class CourseType(models.TextChoices):
+        CORE     = "CORE",     "Core"
+        ELECTIVE = "ELECTIVE", "Elective"
+
+    code        = models.CharField(max_length=20, unique=True)
+    title       = models.CharField(max_length=200)
+    credits     = models.PositiveSmallIntegerField()
+    course_type = models.CharField(
+        max_length=10,
+        choices=CourseType.choices,
+        default=CourseType.CORE,
+    )
+    department  = models.ForeignKey(
+        Department,
+        on_delete=models.PROTECT,
+        related_name="courses",
+    )
+    lec_sessions = models.PositiveSmallIntegerField(default=1)
+    tut_sessions = models.PositiveSmallIntegerField(default=1)
+    lab_sessions = models.PositiveSmallIntegerField(default=1)
+
+    def __str__(self):
+        return f"{self.code} — {self.title}"
+
+
+# ─────────────────────────────────────────────────────────────
+# Room
+# ─────────────────────────────────────────────────────────────
+
+class Room(TimestampedModel):
+
+    class RoomType(models.TextChoices):
+        LECTURE = "LECTURE", "Lecture Hall"
+        LAB     = "LAB",     "Laboratory"
+        SEMINAR = "SEMINAR", "Seminar Room"
+
+    code       = models.CharField(max_length=20, unique=True)
+    name       = models.CharField(max_length=100)
+    capacity   = models.PositiveIntegerField()
+    room_type  = models.CharField(max_length=10, choices=RoomType.choices)
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="rooms",
+    )
+    is_active  = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.code} ({self.room_type}, cap {self.capacity})"
+
+
+# ─────────────────────────────────────────────────────────────
+# StudyGroup
+# ─────────────────────────────────────────────────────────────
+
+class StudyGroup(TimestampedModel):
+    discipline = models.ForeignKey(
+        Discipline,
+        on_delete=models.PROTECT,
+        related_name="groups",
+    )
+    term       = models.ForeignKey(
+        Term,
+        on_delete=models.PROTECT,
+        related_name="groups",
+    )
+    year_level = models.PositiveSmallIntegerField()   # 1 – 4
+    number     = models.PositiveSmallIntegerField()   # 1 – N within cohort
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["discipline", "term", "year_level", "number"],
+                name="unique_study_group",
+            )
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.discipline.code} / "
+            f"Y{self.year_level} / "
+            f"G{self.number} / "
+            f"{self.term.name}"
+        )
+
+
+# ─────────────────────────────────────────────────────────────
+# CourseClass
+# ─────────────────────────────────────────────────────────────
+
+class CourseClass(TimestampedModel):
+    course      = models.ForeignKey(
+        Course,
+        on_delete=models.PROTECT,
+        related_name="classes",
+    )
+    
+    group       = models.ForeignKey(
+        StudyGroup,
+        on_delete=models.PROTECT,
+        related_name="course_classes",
+    )
+    coordinator = models.ForeignKey(
+        "users.TeacherProfile",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="coordinated_classes",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["course", "group"],
+                name="unique_course_group",
+            )
+        ]
+
+    
+    def __str__(self):
+        return f"{self.course.code} / {self.group}"
+</file>
+
+<file path="records/models.py">
+from django.db import models
+from django.core.exceptions import ValidationError
+from decimal import Decimal
+from django.db.models import Q
+from users.models import TimestampedModel, SoftDeleteModel, ActiveManager
+
+
+# ─────────────────────────────────────────────────────────────
+# Enrollment
+# ─────────────────────────────────────────────────────────────
+
+class EnrollmentManager(models.Manager):
+    """
+    By default, Enrollment.objects.all() returns EVERYTHING (Active, Dropped, Withdrawn).
+    Admins and Finance need to see the full historical ledger.
+    """
+    def active(self):
+        """Used for checking current active seating capacity and active gradebooks."""
+        return self.filter(status=self.model.EnrollmentStatus.ENROLLED)
+
+    def historical(self):
+        """Used for transcript generation and financial audits."""
+        return self.filter(status__in=[
+            self.model.EnrollmentStatus.DROPPED, 
+            self.model.EnrollmentStatus.WITHDRAWN,
+            self.model.EnrollmentStatus.COMPLETED
+        ])
+
+class Enrollment(TimestampedModel):
+    class EnrollmentStatus(models.TextChoices):
+        ENROLLED  = "ENROLLED",  "Enrolled (Active)"
+        DROPPED   = "DROPPED",   "Dropped (Early/Refunded)"
+        WITHDRAWN = "WITHDRAWN", "Withdrawn (W on Transcript)"
+        COMPLETED = "COMPLETED", "Completed (Final Grade Issued)"
+
+    student      = models.ForeignKey(
+        "users.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="enrollments",
+    )
+    course_class = models.ForeignKey(
+        "academics.CourseClass",
+        on_delete=models.PROTECT,
+        related_name="enrollments",
+    )
+    lecture_session = models.ForeignKey(
+        "scheduling.Session",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="lecture_enrollments",
+        limit_choices_to={"session_type": "LECTURE"},
+    )
+    tutorial_session = models.ForeignKey(
+        "scheduling.Session",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="tutorial_enrollments",
+        limit_choices_to={"session_type": "TUTORIAL"},
+    )
+    lab_session = models.ForeignKey(
+        "scheduling.Session",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="lab_enrollments",
+        limit_choices_to={"session_type": "LAB"},
+    )
+    status = models.CharField(
+        max_length=15,
+        choices=EnrollmentStatus.choices,
+        default=EnrollmentStatus.ENROLLED, 
+    )
+
+    final_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        help_text="Official final grade. Null until enrollment is COMPLETED."
+    )
+
+    course_grade_points = models.DecimalField(
+        max_digits=3, decimal_places=2, 
+        null=True, blank=True,  # Allow it to be empty mid-semester
+        help_text="Only calculated when enrollment is COMPLETED."
+    )
+
+    objects = EnrollmentManager()
+    all_objects = models.Manager()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "course_class"],
+                name="unique_student_enrollment",
+            )
+        ]
+
+
+    def clean(self):
+        errors = {}
+
+        # 1. Session Validation
+        session_fields = {
+            "lecture_session":  self.lecture_session,
+            "tutorial_session": self.tutorial_session,
+            "lab_session":      self.lab_session,
+        }
+        for field_name, session in session_fields.items():
+            if session and session.course_class_id != self.course_class_id:
+                errors[field_name] = (
+                    f"This session does not belong to {self.course_class}. "
+                    "Only sessions from the enrolled CourseClass are allowed."
+                )
+
+        # 2. Duplicate Course Constraint
+        if self.student_id and self.course_class_id:
+            target_course = self.course_class.course
+            target_term = self.course_class.group.term  
+
+            duplicate_enrollment = Enrollment.objects.filter(
+                student=self.student,
+                course_class__course=target_course,
+                course_class__group__term=target_term  
+            ).exclude(pk=self.pk).exists()
+
+            if duplicate_enrollment:
+                errors["course_class"] = (
+                    f"Student is already enrolled in {target_course.code} for {target_term}. "
+                    "You cannot register for two different groups in the same term."
+                )
+        
+        # 3. Fire all errors at once
+        if errors:
+            raise ValidationError(errors)
+        
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def recalculate_grades(self):
+        # 1. Fail fast: If active, clear grades and skip the database query entirely
+        if self.status != self.EnrollmentStatus.COMPLETED:
+            self.final_percentage = None
+            self.course_grade_points = None
+            self.save(update_fields=['final_percentage', 'course_grade_points', 'updated_at'])
+            return
+
+        # 2. Only hit the database if the term is actually over
+        from django.db.models import Sum
+        from decimal import Decimal
+        
+        raw_total = self.grades.aggregate(total_score=Sum('score'))['total_score'] or 0
+        total = Decimal(str(raw_total)).quantize(Decimal('0.01'))
+
+        self.final_percentage = total
+        
+        if total >= 93: self.course_grade_points = Decimal('4.0')
+        elif total >= 89: self.course_grade_points = Decimal('3.7')
+        elif total >= 84: self.course_grade_points = Decimal('3.3')
+        elif total >= 79: self.course_grade_points = Decimal('3.0')
+        elif total >= 74: self.course_grade_points = Decimal('2.7')
+        elif total >= 69: self.course_grade_points = Decimal('2.4')
+        elif total >= 64: self.course_grade_points = Decimal('2.0')
+        elif total >= 60: self.course_grade_points = Decimal('1.0')
+        else: self.course_grade_points = Decimal('0.0')
+
+        self.save(update_fields=['final_percentage', 'course_grade_points', 'updated_at'])
+
+
+# ─────────────────────────────────────────────────────────────
+# GradeEntry
+# ─────────────────────────────────────────────────────────────
+
+class GradeEntry(TimestampedModel):
+    enrollment = models.ForeignKey(
+        Enrollment,
+        on_delete=models.CASCADE,
+        related_name="grades",
+    )
+    component  = models.CharField(
+        max_length=100,
+        help_text="e.g. 'Midterm Exam', 'Final Exam', 'Quiz 1', 'Homework'",
+    )
+    # Raw score on the component's own scale.
+    # e.g. 28.00 for a midterm marked out of 30,
+    #      45.00 for a final marked out of 50,
+    #       4.00 for a quiz marked out of 5.
+    # All components must sum to 100 across a full term.
+    score = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        help_text="Raw score on this component's scale (not out of 100).",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["enrollment", "component"],
+                name="unique_grade_component_per_enrollment",
+            )
+        ]
+
+        # Here is the index
+        indexes = [
+            models.Index(
+                fields=['enrollment', 'score'], 
+                name='idx_enrollment_score_cover'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.enrollment} | {self.component}: {self.score}"
+
+
+# ─────────────────────────────────────────────────────────────
+# AttendanceRecord
+# ─────────────────────────────────────────────────────────────
+
+class AttendanceRecord(TimestampedModel):
+    class Status(models.TextChoices):
+        PRESENT = "PRESENT", "Present"
+        ABSENT  = "ABSENT",  "Absent"
+        LATE    = "LATE",    "Late"
+        EXCUSED = "EXCUSED", "Excused"
+
+    student = models.ForeignKey(
+        "users.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="attendance_records",
+    )
+    session = models.ForeignKey(
+        "scheduling.Session",
+        on_delete=models.CASCADE,
+        related_name="attendance_records",
+    )
+    week   = models.PositiveSmallIntegerField(
+        help_text="Week number within the term (1-based).",
+    )
+    status = models.CharField(max_length=10, choices=Status.choices)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "session", "week"],
+                name="unique_attendance_per_session_week",
+            )
+        ]
+    def clean(self):
+        is_enrolled = Enrollment.objects.filter(
+            student=self.student,
+            course_class=self.session.course_class,
+        ).exists()
+        if not is_enrolled:
+            raise ValidationError(
+                f"Student {self.student} is not enrolled in "
+                f"{self.session.course_class}."
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.student} | {self.session} | W{self.week} [{self.status}]"
+
+
+# ─────────────────────────────────────────────────────────────
+# Exam
+# ─────────────────────────────────────────────────────────────
+
+class Exam(TimestampedModel):
+    class ExamType(models.TextChoices):
+        MIDTERM   = "MIDTERM",   "Midterm Exam"
+        FINAL     = "FINAL",     "Final Exam"
+        PRACTICAL = "PRACTICAL", "Practical/Lab Exam"
+        QUIZ      = "QUIZ",      "Quiz"
+
+    course_class = models.ForeignKey(
+        "academics.CourseClass",
+        on_delete=models.CASCADE,
+        related_name="exams",
+    )
+    exam_type = models.CharField(max_length=20, choices=ExamType.choices)
+    week      = models.PositiveSmallIntegerField(
+        help_text="Week number within the term when the exam is held (1-based).",
+    )
+    max_score = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        help_text="Maximum achievable score, e.g. 30.00 for a midterm worth 30 marks.",
+    )
+
+
+    class Meta:
+        constraints = [
+            # MIDTERM and FINAL are singular per class; QUIZzes and PRACTICAL are unlimited.
+            models.UniqueConstraint(
+                fields=["course_class", "exam_type"],
+                condition=Q(exam_type__in=["FINAL", "MIDTERM"]),
+                name="unique_singular_exam_type_per_class",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.course_class} | {self.get_exam_type_display()} (W{self.week})"
+
+
+# ─────────────────────────────────────────────────────────────
+# ExamResult
+# ─────────────────────────────────────────────────────────────
+
+class ExamResult(TimestampedModel):
+    class Status(models.TextChoices):
+        PRESENT  = "PRESENT",  "Present"
+        ABSENT   = "ABSENT",   "Absent"
+        EXCUSED  = "EXCUSED",  "Excused"
+        CHEATING = "CHEATING", "Disqualified"
+
+    exam    = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name="results")
+    student = models.ForeignKey(
+        "users.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="exam_results",
+    )
+    status = models.CharField(
+        max_length=15,
+        choices=Status.choices,
+        default=Status.PRESENT,
+    )
+    # null  → row created after exam was held, grading not yet complete
+    # 0.00  → student sat the exam and scored zero (or disqualified)
+    score  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["exam", "student"],
+                name="unique_student_exam_result",
+            ),
+        ]
+
+    def clean(self):
+        # 1. Enrollment check
+        if not Enrollment.objects.filter(
+            student=self.student,
+            course_class=self.exam.course_class,
+        ).exists():
+            raise ValidationError(
+                f"Student {self.student} is not enrolled in {self.exam.course_class}."
+            )
+
+        # 2. Score bounds
+        if self.score is not None:
+            if self.score < 0:
+                raise ValidationError("Score cannot be negative.")
+            if self.score > self.exam.max_score:
+                raise ValidationError(
+                    f"Score {self.score} exceeds the maximum of {self.exam.max_score}."
+                )
+
+        # 3. Absent or disqualified students cannot have a positive score
+        if self.status in (self.Status.ABSENT, self.Status.CHEATING):
+            if self.score is not None and self.score > 0:
+                raise ValidationError(
+                    "An absent or disqualified student cannot have a score above 0."
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        score_display = str(self.score) if self.score is not None else "not graded"
+        return f"{self.student} | {self.exam} → {score_display}"
+
+
+# ─────────────────────────────────────────────────────────────
+# Assignment
+# ─────────────────────────────────────────────────────────────
+
+class Assignment(TimestampedModel):
+    class AssignmentType(models.TextChoices):
+        HOMEWORK = "HOMEWORK", "Homework"
+        PROJECT  = "PROJECT",  "Project"
+        ESSAY    = "ESSAY",    "Essay"
+
+    course_class    = models.ForeignKey(
+        "academics.CourseClass",
+        on_delete=models.CASCADE,
+        related_name="assignments",
+    )
+    assignment_type = models.CharField(max_length=20, choices=AssignmentType.choices)
+    due_week        = models.PositiveSmallIntegerField(
+        help_text="Week number within the term by which the assignment is due (1-based).",
+    )
+    max_points      = models.DecimalField(max_digits=5, decimal_places=2)
+
+
+    def __str__(self):
+        return f"{self.course_class} | {self.get_assignment_type_display()} (due W{self.due_week})"
+
+
+# ─────────────────────────────────────────────────────────────
+# StudentSubmission
+# ─────────────────────────────────────────────────────────────
+
+class StudentSubmission(TimestampedModel):
+    student    = models.ForeignKey(
+        "users.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="submissions",
+    )
+    assignment = models.ForeignKey(
+        Assignment,
+        on_delete=models.CASCADE,
+        related_name="submissions",
+    )
+    score        = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "assignment"],
+                name="unique_student_assignment_submission",
+            ),
+        ]
+
+    def clean(self):
+        if not Enrollment.objects.filter(
+            student=self.student,
+            course_class=self.assignment.course_class,
+        ).exists():
+            raise ValidationError(
+                "Student is not enrolled in the class this assignment belongs to."
+            )
+        if self.score is not None:
+            if self.score < 0:
+                raise ValidationError("Score cannot be negative.")
+            if self.score > self.assignment.max_points:
+                raise ValidationError(
+                    f"Score {self.score} exceeds the maximum of {self.assignment.max_points}."
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    @property
+    def is_late(self) -> bool:
+        """
+        True if the submission timestamp is after the end of the due week.
+        Deadline = term start_date + due_week full weeks (i.e. midnight ending that Sunday).
+        """
+        from datetime import timedelta, datetime, timezone
+        term = self.assignment.course_class.group.term
+        deadline = datetime(
+            *term.start_date.timetuple()[:3], tzinfo=timezone.utc
+        ) + timedelta(weeks=self.assignment.due_week)
+        return self.submitted_at > deadline
+
+    def __str__(self):
+        return f"{self.student} → {self.assignment}"
+
+
+# ─────────────────────────────────────────────────────────────
+# Signals
+# ─────────────────────────────────────────────────────────────
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
+
+# ExamResult -> GradeEntry sync (Your existing signal)
+@receiver(post_save, sender='records.ExamResult')
+def sync_exam_result_to_grade_entry(sender, instance, **kwargs):
+    if instance.score is None:
+        return
+
+    from records.models import Enrollment, GradeEntry # Local import to avoid circular dependencies if any
+    enrollment = Enrollment.objects.filter(
+        student=instance.student,
+        course_class=instance.exam.course_class,
+    ).first()
+
+    if not enrollment:
+        return
+
+    GradeEntry.objects.update_or_create(
+        enrollment=enrollment,
+        component=instance.exam.get_exam_type_display(),
+        defaults={"score": instance.score},
+    )
+
+@receiver(post_save, sender='records.GradeEntry')
+@receiver(post_delete, sender='records.GradeEntry')
+def sync_enrollment_totals(sender, instance, **kwargs):
+    """
+    Whenever a GradeEntry is created, updated, or deleted,
+    recalculate the parent Enrollment's total grade.
+    """
+    if instance.enrollment_id:
+        # Fetch fresh instance to avoid stale data
+        instance.enrollment.recalculate_grades()
+</file>
+
+</files>
