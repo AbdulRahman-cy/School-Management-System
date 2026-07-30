@@ -3,6 +3,8 @@ from django.core.exceptions import ValidationError
 from decimal import Decimal
 from django.db.models import Q
 from users.models import TimestampedModel, SoftDeleteModel, ActiveManager
+from django.db.models import Sum
+from decimal import Decimal
 
 
 # ─────────────────────────────────────────────────────────────
@@ -144,26 +146,26 @@ class Enrollment(TimestampedModel):
             self.save(update_fields=['final_percentage', 'course_grade_points', 'updated_at'])
             return
 
-        # 2. Only hit the database if the term is actually over
-        from django.db.models import Sum
-        from decimal import Decimal
-        
-        raw_total = self.grades.aggregate(total_score=Sum('score'))['total_score'] or 0
-        total = Decimal(str(raw_total)).quantize(Decimal('0.01'))
+        with transaction.atomic():
+            # 2. Only hit the database if the term is actually over
+            Enrollment.objects.select_for_update().get(pk=self.pk)
+            
+            raw_total = self.grades.aggregate(total_score=Sum('score'))['total_score'] or 0
+            total = Decimal(str(raw_total)).quantize(Decimal('0.01'))
 
-        self.final_percentage = total
-        
-        if total >= 93: self.course_grade_points = Decimal('4.0')
-        elif total >= 89: self.course_grade_points = Decimal('3.7')
-        elif total >= 84: self.course_grade_points = Decimal('3.3')
-        elif total >= 79: self.course_grade_points = Decimal('3.0')
-        elif total >= 74: self.course_grade_points = Decimal('2.7')
-        elif total >= 69: self.course_grade_points = Decimal('2.4')
-        elif total >= 64: self.course_grade_points = Decimal('2.0')
-        elif total >= 60: self.course_grade_points = Decimal('1.0')
-        else: self.course_grade_points = Decimal('0.0')
+            self.final_percentage = total
+            
+            if total >= 93: self.course_grade_points = Decimal('4.0')
+            elif total >= 89: self.course_grade_points = Decimal('3.7')
+            elif total >= 84: self.course_grade_points = Decimal('3.3')
+            elif total >= 79: self.course_grade_points = Decimal('3.0')
+            elif total >= 74: self.course_grade_points = Decimal('2.7')
+            elif total >= 69: self.course_grade_points = Decimal('2.4')
+            elif total >= 64: self.course_grade_points = Decimal('2.0')
+            elif total >= 60: self.course_grade_points = Decimal('1.0')
+            else: self.course_grade_points = Decimal('0.0')
 
-        self.save(update_fields=['final_percentage', 'course_grade_points', 'updated_at'])
+            self.save(update_fields=['final_percentage', 'course_grade_points', 'updated_at'])
 
 
 # ─────────────────────────────────────────────────────────────

@@ -5,6 +5,8 @@ from records.models import (
     Enrollment, GradeEntry, AttendanceRecord,
     Exam, ExamResult, Assignment, StudentSubmission,
 )
+from django.db.models import Avg, Max, Min, Count, Q
+from rest_framework import serializers
 
 
 # ─────────────────────────────────────────────────────────────
@@ -52,9 +54,7 @@ class DashboardEnrollmentSerializer(serializers.ModelSerializer):
             'course_title'    # Matches the "COURSE TITLE" column
         ]    
 
-import statistics
-from django.db.models import Avg, Max, Min, Count, Q
-from rest_framework import serializers
+
 # ... [Keep your other imports and serializers] ...
 
 class EnrollmentSerializer(serializers.ModelSerializer):

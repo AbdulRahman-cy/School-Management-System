@@ -13,7 +13,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='discipline',
             name='program_type',
-            field=models.CharField(choices=[('GSP', 'General Scientific Program'), ('SSP', 'Specialised Scientific Program')], default='GENERAL', max_length=3),
+            field=models.CharField(choices=[('GSP', 'General Scientific Program'), ('SSP', 'Specialised Scientific Program')], default='GSP', max_length=3),
             preserve_default=False,
         ),
     ]

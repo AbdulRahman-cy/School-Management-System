@@ -62,10 +62,21 @@ TEMPLATES = [
 WSGI_APPLICATION = 'core.wsgi.application'
 
 DATABASES = {
+    # THE ACTIVE POSTGRES CONNECTION
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME':   BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'university_db',
+        'USER': 'postgres_user',
+        'PASSWORD': 'postgres_password',
+        'HOST': 'db',
+        'PORT': '5432',
     }
+    
+    # THE COMMENTED OUT SQLITE CONNECTION
+    # 'default': {
+    #     'ENGINE': 'django.db.backends.sqlite3',
+    #     'NAME': BASE_DIR / 'db.sqlite3',
+    # }
 }
 
 AUTH_PASSWORD_VALIDATORS = [

@@ -88,6 +88,7 @@ class Command(BaseCommand):
             if eligible: return eligible
             return [i for i, r in enumerate(rooms) if r.room_type in allowed]
 
+        # Create boolean variables for each requirement, timeslot, and eligible room
         for req in requirements:
             dept_id = req["cc"].course.department_id 
             eligible = get_eligible_rooms(req["type"], dept_id)
@@ -95,27 +96,30 @@ class Command(BaseCommand):
             for ts_idx in range(n_ts):
                 for r_idx in eligible:
                     assign[req["req_idx"], ts_idx, r_idx] = model.new_bool_var(f"a_{req['req_idx']}_{ts_idx}_{r_idx}")
-
+        
+        # Constraint 1: Each requirement must be assigned to exactly one composite of (timeslot, room)
         for req in requirements:
             dept_id = req["cc"].course.department_id
             eligible = get_eligible_rooms(req["type"], dept_id)
             if not eligible:
                 raise CommandError(f"CRASH: No '{req['type']}' room exists in the database for course {req['cc'].course.code}!")
             model.add_exactly_one(assign[req["req_idx"], ts_idx, r_idx] for ts_idx in range(n_ts) for r_idx in eligible)
-
+        
+        # Constraint 2: No two requirements can be assigned to the same combination of (timeslot, room)
         for ts_idx in range(n_ts):
             for r_idx in range(n_rooms):
                 overlapping = [assign[req["req_idx"], ts_idx, r_idx] for req in requirements if (req["req_idx"], ts_idx, r_idx) in assign]
                 if overlapping:
                     model.add_at_most_one(overlapping)
 
+        # Constraint 3: No two requirements from the same group can be assigned to the same timeslot
         from collections import defaultdict
         reqs_by_group = defaultdict(list)
         for req in requirements:
             reqs_by_group[req["cc"].group_id].append(req)
 
         for group_id, grp_reqs in reqs_by_group.items():
-            for ts_idx in range(n_ts):
+            for ts_idx in range(n_ts): 
                 overlapping = [assign[req["req_idx"], ts_idx, r_idx] for req in grp_reqs for r_idx in range(n_rooms) if (req["req_idx"], ts_idx, r_idx) in assign]
                 if overlapping:
                     model.add_at_most_one(overlapping)

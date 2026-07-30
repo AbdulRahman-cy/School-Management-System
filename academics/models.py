@@ -49,18 +49,16 @@ class Discipline(TimestampedModel):
 
 
 class Term(TimestampedModel):
+    class Season(models.TextChoices):
+        FALL = "FALL", "Fall"
+        SPRING = "SPRING", "Spring"
+        SUMMER = "SUMMER", "Summer"
+
     name       = models.CharField(max_length=100, unique=True)
+    season     = models.CharField(max_length=10, choices=Season.choices, null=True) # Temporarily null
     start_date = models.DateField()
     end_date   = models.DateField()
     is_active  = models.BooleanField(default=False)
-
-    def save(self, *args, **kwargs):
-        if self.is_active:
-            Term.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.name
 
 
 # ─────────────────────────────────────────────────────────────
@@ -138,7 +136,7 @@ class StudyGroup(TimestampedModel):
     )
     year_level = models.PositiveSmallIntegerField()   # 1 – 4
     number     = models.PositiveSmallIntegerField()   # 1 – N within cohort
-
+    capacity   = models.PositiveIntegerField(default=50)
     class Meta:
         constraints = [
             models.UniqueConstraint(

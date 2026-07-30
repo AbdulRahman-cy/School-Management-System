@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: university_db
+      POSTGRES_USER: postgres_user
+      POSTGRES_PASSWORD: postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+  migrator:
+    image: ghcr.io/dimitri/pgloader:latest
+    profiles: ["tools"]
+    depends_on:
+      - db
+    volumes:
+      - .:/data
+    command: ["pgloader", "/data/migrate.load"]
+
+volumes:
+  postgres_data:
