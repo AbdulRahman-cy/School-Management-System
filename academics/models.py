@@ -188,6 +188,66 @@ class CourseClass(TimestampedModel):
     
     def __str__(self):
         return f"{self.course.code} / {self.group}"
+
+
+class CoursePrerequisite(TimestampedModel):
+    target_course = models.ForeignKey(
+        'Course', 
+        on_delete=models.CASCADE, 
+        related_name='prerequisite_requirements'
+    )
+    prerequisite_course = models.ForeignKey(
+        'Course', 
+        on_delete=models.CASCADE, 
+        related_name='unlocks_courses'
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["target_course", "prerequisite_course"],
+                name="unique_prerequisite_mapping",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.prerequisite_course.code} -> {self.target_course.code}"
+
+
+class CurriculumBlueprint(TimestampedModel):
+    discipline = models.ForeignKey(
+        "academics.Discipline",
+        on_delete=models.CASCADE,
+        related_name="blueprints",
+    )
+    course = models.ForeignKey(
+        "academics.Course",
+        on_delete=models.CASCADE,
+        related_name="blueprints",
+    )
+    year_level = models.PositiveSmallIntegerField(
+        help_text="e.g., 1, 2, 3, 4"
+    )
+    
+    season = models.CharField(
+        max_length=10, 
+        choices=Term.Season.choices
+    )
+    is_mandatory = models.BooleanField(
+        default=True,
+        help_text="True for core courses, False for electives."
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["discipline", "course", "year_level", "season"],
+                name="unique_blueprint_course_per_semester",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.discipline.code} - Y{self.year_level} {self.get_season_display()} - {self.course.code}"
     
 
 

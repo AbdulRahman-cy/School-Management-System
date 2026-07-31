@@ -1,3 +1,511 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: tailwind.config.js, src/index.css, src/courseColors.ts, src/App.tsx, src/components/ui/**/*, src/api/**/*, src/types/**/*, src/context/**/*, src/pages/Dashboard.tsx
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+src/
+  api/
+    auth.ts
+    index.ts
+  context/
+    AuthContext.tsx
+  pages/
+    Dashboard.tsx
+  types/
+    index.ts
+  App.tsx
+  courseColors.ts
+  index.css
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="src/api/auth.ts">
+/**
+ * src/api/auth.ts
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Cookie-based JWT auth.
+ *
+ * Token storage
+ * ─────────────
+ *   access_token  → HttpOnly cookie  (JS cannot read or touch)
+ *   refresh_token → HttpOnly cookie  (path-scoped to /api/auth/)
+ *
+ * The frontend NEVER sees either token. It can only:
+ *   - call /api/auth/me/ to ask "am I logged in?"
+ *   - rely on the browser to attach cookies automatically
+ *   - listen for 401s and silently refresh
+ */
+
+import axios from 'axios';
+import type { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+export type UserRole = 'STUDENT' | 'TEACHER' | 'ADMIN';
+
+/** Shape returned by GET /api/auth/me/ — also returned by login() and register(). */
+export interface AuthUser {
+  id:         number;
+  email:      string;
+  first_name: string;
+  last_name:  string;
+  role:       UserRole;
+  profile_id: number | null;
+}
+
+export interface LoginPayload {
+  email:    string;
+  password: string;
+}
+
+export interface RegisterPayload {
+  email:      string;
+  first_name: string;
+  last_name:  string;
+  role:       Exclude<UserRole, 'ADMIN'>;
+  password:   string;
+  password2:  string;
+}
+
+export type DjangoFieldErrors = Record<string, string | string[]>;
+
+export interface ParsedFieldErrors {
+  [field: string]: string;
+  _general: string;
+}
+
+// ─── Logout Handler Injection (avoids circular import with AuthContext) ──────
+
+let _logoutHandler: (() => void) | null = null;
+export const setLogoutHandler = (fn: () => void) => { _logoutHandler = fn; };
+
+// ─── Error Parser ──────────────────────────────────────────────────────────────
+
+export function parseDjangoErrors(data: DjangoFieldErrors): ParsedFieldErrors {
+  const out: ParsedFieldErrors = { _general: '' };
+  for (const [key, value] of Object.entries(data)) {
+    const msg = Array.isArray(value) ? value[0] : value;
+    if (key === 'detail' || key === 'non_field_errors') {
+      out._general = msg;
+    } else {
+      out[key] = msg;
+    }
+  }
+  return out;
+}
+
+// ─── Axios Instances ───────────────────────────────────────────────────────────
+
+/**
+ * authApi — for /api/auth/* lifecycle endpoints only.
+ * No interceptors: a 401 during refresh must NOT trigger another refresh.
+ */
+const authApi: AxiosInstance = axios.create({
+  baseURL:         '/api/auth',
+  withCredentials: true,
+  headers:         { 'Content-Type': 'application/json' },
+});
+
+/**
+ * apiClient — used everywhere else.
+ * Cookies are attached by the browser; no Authorization header needed.
+ */
+export const apiClient: AxiosInstance = axios.create({
+  baseURL:         '/api',
+  withCredentials: true,
+  headers:         { 'Content-Type': 'application/json' },
+});
+
+// ─── Response Interceptor — Silent Refresh ─────────────────────────────────────
+
+let _refreshing: Promise<void> | null = null;
+
+apiClient.interceptors.response.use(
+  (res) => res,
+  async (error: AxiosError) => {
+    const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+
+    if (error.response?.status !== 401 || !original || original._retry) {
+      return Promise.reject(error);
+    }
+    original._retry = true;
+
+    try {
+      if (!_refreshing) {
+        _refreshing = authApi.post('/token/refresh/', {})
+          .then(() => undefined)
+          .finally(() => { _refreshing = null; });
+      }
+      await _refreshing;
+      // Cookie has been refreshed by the server — just retry the original request
+      return apiClient(original);
+    } catch {
+      _logoutHandler?.();
+      return Promise.reject(error);
+    }
+  },
+);
+
+// ─── Auth API Functions ────────────────────────────────────────────────────────
+
+export async function login(payload: LoginPayload): Promise<AuthUser> {
+  try {
+    await authApi.post('/token/', payload);   // sets cookies
+    return await me();                         // fetch user info
+  } catch (err) {
+    const e = err as AxiosError<DjangoFieldErrors>;
+    throw parseDjangoErrors(e.response?.data ?? { detail: 'Login failed.' });
+  }
+}
+
+export async function register(payload: RegisterPayload): Promise<AuthUser> {
+  try {
+    await authApi.post('/register/', payload);
+    return await me();
+  } catch (err) {
+    const e = err as AxiosError<DjangoFieldErrors>;
+    throw parseDjangoErrors(e.response?.data ?? { detail: 'Registration failed.' });
+  }
+}
+
+export async function logout(): Promise<void> {
+  try { await authApi.post('/logout/', {}); }
+  catch { /* swallow — cookies are gone client-side anyway */ }
+}
+
+/**
+ * me() — source of truth for "who is logged in".
+ * Uses apiClient so silent refresh kicks in automatically if the access token
+ * expired but the refresh token is still valid.
+ */
+export async function me(): Promise<AuthUser> {
+  const { data } = await apiClient.get<AuthUser>('/auth/me/');
+  return data;
+}
+
+/** Call on app mount to bootstrap auth state. Returns null if no valid session. */
+export async function tryRestoreSession(): Promise<AuthUser | null> {
+  try { return await me(); } catch { return null; }
+}
+</file>
+
+<file path="src/api/index.ts">
+import { useQuery } from "@tanstack/react-query";
+import { apiClient } from "./auth";
+import type {
+  StudentProfile, Enrollment, EnrollmentRow, Session,
+  ExamResult, StudentSubmission, Exam, Assignment,
+} from "../types";
+ 
+// Re-export so existing imports `import { api } from "../api"` keep working.
+// Old code was `api.get("path")`, new code is the same — apiClient is identical
+// in interface but adds proper auth + silent refresh.
+export const api = apiClient;
+ 
+// ─── Query key factory ────────────────────────────────────────────────────────
+ 
+export const queryKeys = {
+  studentProfile: (id: number)                       => ["students", id] as const,
+  enrollments:    (studentId: number, term?: string) => ["enrollments", { student: studentId, term }] as const,
+  sessions:       (studentId: number)                => ["sessions",      { student: studentId }] as const,
+  examResults:    (studentId: number)                => ["exam-results",  { student: studentId }] as const,
+  submissions:    (studentId: number)                => ["submissions",   { student: studentId }] as const,
+  upcomingExams:  (studentId: number)                => ["upcoming-exams",  { student: studentId }] as const,
+  upcomingAssign: (studentId: number)                => ["upcoming-assign", { student: studentId }] as const,
+};
+ 
+// ─── Fetchers ─────────────────────────────────────────────────────────────────
+ 
+async function fetchStudentProfile(id: number): Promise<StudentProfile> {
+  const { data } = await apiClient.get<StudentProfile>(`/users/students/${id}/`);
+  return data;
+}
+ 
+async function fetchEnrollments(
+  studentId: number,
+  termStatus: "active" | "past" | "all" = "active",
+): Promise<Enrollment[]> {
+  const { data } = await apiClient.get<Enrollment[]>("/records/enrollments/", {
+    params: { student: studentId, term_status: termStatus },
+  });
+  return data;
+}
+
+async function fetchEnrollmentSummary(
+  studentId: number,
+  termStatus: "active" | "past" | "all" = "active",
+): Promise<EnrollmentRow[]> {
+  const { data } = await apiClient.get<EnrollmentRow[]>("/records/enrollments/dashboard-summary/", {
+    params: { student: studentId, term_status: termStatus },
+  });
+  return data;
+}
+ 
+async function fetchStudentSessions(studentId: number): Promise<Session[]> {
+  const { data } = await apiClient.get<Session[]>("/scheduling/schedule-sessions/", {
+    params: { student: studentId },
+  });
+  return data;
+}
+ 
+async function fetchExamResults(studentId: number): Promise<ExamResult[]> {
+  const { data } = await apiClient.get<ExamResult[]>("/records/exam-results/", {
+    params: { student: studentId },
+  });
+  return data;
+}
+ 
+async function fetchStudentSubmissions(studentId: number): Promise<StudentSubmission[]> {
+  const { data } = await apiClient.get<StudentSubmission[]>("/records/student-submissions/", {
+    params: { student: studentId },
+  });
+  return data;
+}
+ 
+async function fetchUpcomingExams(studentId: number): Promise<Exam[]> {
+  const { data } = await apiClient.get<Exam[]>("/records/exams/", {
+    params: { student: studentId, term_status: "active" },
+  });
+  return data;
+}
+ 
+async function fetchUpcomingAssignments(studentId: number): Promise<Assignment[]> {
+  const { data } = await apiClient.get<Assignment[]>("/records/assignments/", {
+    params: { student: studentId, term_status: "active" },
+  });
+  return data;
+}
+ 
+// ─── Hooks ────────────────────────────────────────────────────────────────────
+// All hooks now refuse to fetch when studentId is 0/null — prevents the
+// "loading data for student #0" / "student #4" flicker on first paint.
+ 
+const ENABLED = (id: number | null | undefined) =>
+  typeof id === "number" && id > 0;
+ 
+export function useStudentProfile(id: number | null) {
+  return useQuery({
+    queryKey:  queryKeys.studentProfile(id ?? 0),
+    queryFn:   () => fetchStudentProfile(id as number),
+    staleTime: 5 * 60 * 1000,
+    retry:     1,
+    enabled:   ENABLED(id),
+  });
+}
+ 
+export function useEnrollments(
+  studentId: number | null,
+  termStatus: "active" | "past" | "all" = "active",
+) {
+  return useQuery({
+    queryKey:  queryKeys.enrollments(studentId ?? 0, termStatus),
+    queryFn:   () => fetchEnrollmentSummary(studentId as number, termStatus),
+    staleTime: 2 * 60 * 1000,
+    retry:     1,
+    enabled:   ENABLED(studentId),
+  });
+}
+ 
+export function usePastEnrollments(studentId: number | null) {
+  return useQuery({
+    queryKey:  queryKeys.enrollments(studentId ?? 0, "past"),
+    queryFn:   () => fetchEnrollments(studentId as number, "past"),
+    staleTime: 2 * 60 * 1000,
+    retry:     1,
+    enabled:   ENABLED(studentId),
+  });
+}
+ 
+export function useStudentSessions(studentId: number | null) {
+  return useQuery({
+    queryKey:  queryKeys.sessions(studentId ?? 0),
+    queryFn:   () => fetchStudentSessions(studentId as number),
+    staleTime: 2 * 60 * 1000,
+    retry:     1,
+    enabled:   ENABLED(studentId),
+  });
+}
+ 
+export function useExamResults(studentId: number | null) {
+  return useQuery({
+    queryKey:  queryKeys.examResults(studentId ?? 0),
+    queryFn:   () => fetchExamResults(studentId as number),
+    staleTime: 2 * 60 * 1000,
+    retry:     1,
+    enabled:   ENABLED(studentId),
+  });
+}
+ 
+export function useStudentSubmissions(studentId: number | null) {
+  return useQuery({
+    queryKey:  queryKeys.submissions(studentId ?? 0),
+    queryFn:   () => fetchStudentSubmissions(studentId as number),
+    staleTime: 2 * 60 * 1000,
+    retry:     1,
+    enabled:   ENABLED(studentId),
+  });
+}
+ 
+export function useUpcomingExams(studentId: number | null) {
+  return useQuery({
+    queryKey:  queryKeys.upcomingExams(studentId ?? 0),
+    queryFn:   () => fetchUpcomingExams(studentId as number),
+    staleTime: 2 * 60 * 1000,
+    retry:     1,
+    enabled:   ENABLED(studentId),
+  });
+}
+ 
+export function useUpcomingAssignments(studentId: number | null) {
+  return useQuery({
+    queryKey:  queryKeys.upcomingAssign(studentId ?? 0),
+    queryFn:   () => fetchUpcomingAssignments(studentId as number),
+    staleTime: 2 * 60 * 1000,
+    retry:     1,
+    enabled:   ENABLED(studentId),
+  });
+}
+</file>
+
+<file path="src/context/AuthContext.tsx">
+/**
+ * src/context/AuthContext.tsx
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Cookie-based auth context.
+ *
+ * No more JWT decoding on the client — the token is in an HttpOnly cookie that
+ * JS cannot read. User identity comes from GET /api/auth/me/ instead.
+ */
+
+import {
+  createContext, useContext, useState, useEffect, useCallback,
+  type ReactNode,
+} from 'react';
+
+import {
+  setLogoutHandler,
+  tryRestoreSession,
+  logout as apiLogout,
+  type AuthUser,
+} from '../api/auth';
+
+// Re-export so consumers don't need to import from two places
+export type { AuthUser };
+
+// ─── Context Value ────────────────────────────────────────────────────────────
+
+export interface AuthContextValue {
+  user:               AuthUser | null;
+  isLoading:          boolean;
+  isAuthenticated:    boolean;
+  studentId:          number | null;
+  teacherId:          number | null;
+  handleLoginSuccess: (user: AuthUser) => void;
+  logout:             () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+// ─── Provider ──────────────────────────────────────────────────────────────────
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user,      setUser]    = useState<AuthUser | null>(null);
+  const [isLoading, setLoading] = useState(true);
+
+  const handleLoginSuccess = useCallback((u: AuthUser) => {
+    setUser(u);
+  }, []);
+
+  const logout = useCallback(async () => {
+    await apiLogout();   // clears cookies server-side + blacklists refresh
+    setUser(null);
+  }, []);
+
+  // Wire the apiClient interceptor's "refresh failed → log out" hook
+  useEffect(() => { setLogoutHandler(() => setUser(null)); }, []);
+
+  // Bootstrap: ask the server who we are. If the access cookie is expired
+  // but the refresh cookie is still valid, the apiClient interceptor will
+  // silently refresh and retry — we just await the answer.
+  useEffect(() => {
+    let cancelled = false;
+
+    tryRestoreSession()
+      .then((u) => { if (!cancelled) setUser(u); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // Derived role-specific ids — kept for backward compatibility
+  const studentId = user?.role === 'STUDENT' ? user.profile_id : null;
+  const teacherId = user?.role === 'TEACHER' ? user.profile_id : null;
+
+  return (
+    <AuthContext.Provider value={{
+      user,
+      isLoading,
+      isAuthenticated: user !== null,
+      studentId,
+      teacherId,
+      handleLoginSuccess,
+      logout,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// ─── Hook ──────────────────────────────────────────────────────────────────────
+
+export function useAuth(): AuthContextValue {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth() must be called inside <AuthProvider>.');
+  return ctx;
+}
+</file>
+
+<file path="src/pages/Dashboard.tsx">
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useStudentProfile, useEnrollments, useStudentSessions, useUpcomingExams, useUpcomingAssignments } from "../api";
 import type { Enrollment, EnrollmentRow, Session, NextClassInfo } from "../types";
@@ -5,7 +513,6 @@ import Attendance from "./Attendance";
 import CourseworkDashboard from "./CourseworkDashboard";
 import { getCourseColorTheme } from "../courseColors";
 import ExamSchedulePage from "./ExamSchedulePage";
-import StudyGroupsPage from "./StudyGroupsPage";
 import GradesPage from "./GradesPage";
 import { useAuth } from '../context/AuthContext';
 
@@ -178,7 +685,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
 
 // ─── Nav ──────────────────────────────────────────────────────────────────────
 
-const ALL_STUDENT_NAV_ITEMS = [
+const NAV_ITEMS = [
   { id: "dashboard",  label: "Dashboard",        icon: "⊞", group: "" },
   { id: "profile",    label: "My Profile",        icon: "◎", group: "" },
   { id: "schedule",   label: "Timetable",         icon: "▦", group: "ACADEMIC" },
@@ -186,28 +693,10 @@ const ALL_STUDENT_NAV_ITEMS = [
   { id: "grades",     label: "Grades",            icon: "◈", group: "ACADEMIC" },
   { id: "exams",      label: "Exam Schedule",     icon: "◷", group: "ACADEMIC" },
   { id: "attendance", label: "Attendance",        icon: "◻", group: "ACADEMIC" },
-  { id: "fees",         label: "Fees & Payments",   icon: "◇", group: "ADMIN" },
-  { id: "documents",   label: "Documents",         icon: "◱", group: "ADMIN" },
-  { id: "warnings",    label: "Academic Standing", icon: "△", group: "ADMIN" },
+  { id: "fees",       label: "Fees & Payments",   icon: "◇", group: "ADMIN" },
+  { id: "documents",  label: "Documents",         icon: "◱", group: "ADMIN" },
+  { id: "warnings",   label: "Academic Standing", icon: "△", group: "ADMIN" },
 ];
-
-const PRESIDENT_EMAIL = "t.michelle.reyes0@alexu.edu.eg";
-
-function getNavItems(user: { role: string; email: string } | null) {
-  if (!user) return ALL_STUDENT_NAV_ITEMS;
-  if (user.role === "STUDENT") return ALL_STUDENT_NAV_ITEMS;
-  if (user.role === "TEACHER") {
-    if (user.email === PRESIDENT_EMAIL) {
-      return [{ id: "study-groups", label: "Study Groups", icon: "⊞", group: "ADMIN" }];
-    }
-    return [];
-  }
-  // ADMIN or other — show everything including study-groups
-  return [
-    ...ALL_STUDENT_NAV_ITEMS,
-    { id: "study-groups", label: "Study Groups", icon: "⊞", group: "ADMIN" },
-  ];
-}
 
 // ─── Exam Schedule page ───────────────────────────────────────────────────────
 
@@ -341,27 +830,20 @@ export default function UniversityPortal() {
             {!collapsed && <div><div style={{ fontSize: 12, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.2px", whiteSpace: "nowrap" }}>Ibn al-Hitham</div><div style={{ fontSize: 9, color: "#a78bfa", fontWeight: 500, letterSpacing: ".5px", whiteSpace: "nowrap" }}>UNIVERSITY PORTAL</div></div>}
           </div>
           <nav style={{ flex: 1, padding: "10px 6px", overflowY: "auto" }}>
-            {(() => {
-              const navItems = getNavItems(user ? { role: user.role, email: user.email } : null);
-              return ["", "ACADEMIC", "ADMIN"].map(group => {
-                const groupItems = navItems.filter(n => n.group === group);
-                if (groupItems.length === 0) return null;
-                return (
-                  <div key={group}>
-                    {group && !collapsed && <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "1px", color: "#c4b5fd", padding: "9px 10px 3px", whiteSpace: "nowrap" }}>{group}</div>}
-                    {groupItems.map(item => {
-                      const isAct = activeNav === item.id;
-                      return (
-                        <div key={item.id} className={`nav-i${isAct ? " act" : ""}`} onClick={() => setActiveNav(item.id)}>
-                          <span style={{ fontSize: 14, flexShrink: 0, opacity: isAct ? 1 : 0.55 }}>{item.icon}</span>
-                          {!collapsed && <span style={{ flex: 1, whiteSpace: "nowrap" }}>{item.label}</span>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              });
-            })()}
+            {["", "ACADEMIC", "ADMIN"].map(group => (
+              <div key={group}>
+                {group && !collapsed && <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "1px", color: "#c4b5fd", padding: "9px 10px 3px", whiteSpace: "nowrap" }}>{group}</div>}
+                {NAV_ITEMS.filter(n => n.group === group).map(item => {
+                  const isAct = activeNav === item.id;
+                  return (
+                    <div key={item.id} className={`nav-i${isAct ? " act" : ""}`} onClick={() => setActiveNav(item.id)}>
+                      <span style={{ fontSize: 14, flexShrink: 0, opacity: isAct ? 1 : 0.55 }}>{item.icon}</span>
+                      {!collapsed && <span style={{ flex: 1, whiteSpace: "nowrap" }}>{item.label}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </nav>
           {!collapsed && (
             <div style={{ margin: "0 6px 10px", padding: "11px", background: "#faf5ff", borderRadius: 11, border: "1px solid #ede9fe" }}>
@@ -778,9 +1260,6 @@ export default function UniversityPortal() {
               /* ── Attendance page ─────────────────────────────────────── */
               <Attendance studentId={STUDENT_ID} />
 
-            ) : activeNav === "study-groups" ? (
-              <StudyGroupsPage />
-
             ) : activeNav === "exams" ? (
               <ExamSchedulePage studentId={STUDENT_ID} />
 
@@ -789,7 +1268,7 @@ export default function UniversityPortal() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
                 <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 20, border: "1px solid #ede9fe" }}>
                   <div style={{ fontSize: 36, marginBottom: 12 }}>🚧</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#1e1b4b" }}>{getNavItems(user ? { role: user.role, email: user.email } : null).find(n => n.id === activeNav)?.label}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#1e1b4b" }}>{NAV_ITEMS.find(n => n.id === activeNav)?.label}</div>
                   <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>Connect your DRF endpoint to populate this view.</div>
                 </div>
               </div>
@@ -800,3 +1279,417 @@ export default function UniversityPortal() {
     </>
   );
 }
+</file>
+
+<file path="src/types/index.ts">
+// ─── Primitives ───────────────────────────────────────────────────────────────
+
+export interface Timestamps {
+  created_at: string; // ISO-8601
+  updated_at: string;
+}
+
+// ─── academics.models ────────────────────────────────────────────────────────
+
+export interface Department extends Timestamps {
+  id: number;
+  code: string;
+  name: string;
+}
+
+export type ProgramType = "GSP" | "SSP";
+
+export interface Discipline extends Timestamps {
+  id: number;
+  code: string;
+  name: string;
+  program_type: ProgramType;
+  department: number; // FK → Department.id
+}
+
+export interface Term extends Timestamps {
+  id: number;
+  name: string;
+  start_date: string; // YYYY-MM-DD
+  end_date: string;
+  is_active: boolean;
+}
+
+export type CourseType = "CORE" | "ELECTIVE";
+
+export interface Course extends Timestamps {
+  id: number;
+  code: string;
+  title: string;
+  credits: number;
+  course_type: CourseType;
+  department: number; // FK → Department.id
+  lec_sessions: number;
+  tut_sessions: number;
+  lab_sessions: number;
+}
+
+export type RoomType = "LECTURE" | "LAB" | "SEMINAR";
+
+export interface Room extends Timestamps {
+  id: number;
+  code: string;
+  name: string;
+  capacity: number;
+  room_type: RoomType;
+  department: number | null;
+  is_active: boolean;
+}
+
+export interface StudyGroup extends Timestamps {
+  id: number;
+  discipline: number; // FK → Discipline.id
+  term: number;       // FK → Term.id
+  year_level: number; // 1–4
+  number: number;     // group number within cohort
+}
+
+/**
+ * Nested shape of `course` inside CourseClass as returned by the API.
+ * Only the fields the serializer exposes inline are listed here.
+ */
+export interface NestedCourse {
+  code: string;
+  title: string;
+}
+
+/**
+ * Nested shape of CourseClass as returned inside Session and Enrollment.
+ * The serializer now returns { id, course: { code, title } } instead of a flat PK.
+ */
+export interface NestedCourseClass {
+  id: number;
+  course: NestedCourse;
+}
+
+/** Full CourseClass record as returned by /academics/course-classes/{id}/ */
+export interface CourseClass extends Timestamps {
+  id: number;
+  course: NestedCourse; // nested — serializer exposes code+title inline
+  term: number;         // FK → Term.id (flat PK)
+  group: number;        // FK → StudyGroup.id (flat PK)
+  coordinator: number | null;
+}
+
+// ─── scheduling.models ───────────────────────────────────────────────────────
+
+// Day integers match Timeslot.Day IntegerChoices:
+// 0=Saturday, 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday
+export type DayInt = 0 | 1 | 2 | 3 | 4 | 5;
+
+// Period integers match Timeslot.Period IntegerChoices
+export type PeriodInt = 1 | 2 | 3 | 4 | 5;
+
+export interface Timeslot extends Timestamps {
+  id: number;
+  day: DayInt;
+  period: PeriodInt;
+}
+
+export type SessionType = "LECTURE" | "LAB" | "TUTORIAL";
+
+/**
+ * Nested shape of Room as returned inside Session.
+ * The serializer now returns { id, code, name } instead of a flat PK.
+ */
+export interface NestedRoom {
+  id: number;
+  code: string;
+  name: string;
+}
+
+export interface Session extends Timestamps {
+  id: number;
+  course_code: string;     // flat — from course_class.course.code via source=
+  course_name: string;     // flat — from course_class.course.title via source=
+  session_type: SessionType;
+  timeslot: Timeslot;      // still nested
+  room: string;            // flat string — room.name via source=
+}
+
+// ─── users.models ────────────────────────────────────────────────────────────
+
+export type UserRole = "ADMIN" | "TEACHER" | "STUDENT";
+
+export interface BaseUser extends Timestamps {
+  id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+  role: UserRole;
+  is_active: boolean;
+  is_staff: boolean;
+  full_name: string; // @property on model
+}
+
+export type TeacherRank = "TA" | "LECTURER" | "ASST_PROF" | "ASSOC_PROF" | "PROFESSOR";
+
+export interface TeacherProfile extends Timestamps {
+  id: number;
+  user: number; // FK → BaseUser.id
+  department: number | null;
+  rank: TeacherRank;
+}
+
+export interface StudentProfile extends Timestamps {
+  id: number;
+  user: BaseUser;        // nested — typical DRF pattern for /students/{id}/
+  discipline: Discipline | null; // nested
+  enrollment_year: number;
+  cumulative_gpa: string | null; // DecimalField serialises as string
+  top_courses: TopCourse[];
+}
+
+export interface TopCourse {
+  id: number;
+  code: string;
+  title: string;
+  percentage: number;
+  grade: string;
+}
+
+// ─── records.models ──────────────────────────────────────────────────────────
+
+export interface GradeEntry extends Timestamps {
+  id: number;
+  enrollment: number; // FK → Enrollment.id
+  component: string;  // e.g. "Midterm Exam", "Final Exam", "Quiz 1"
+  weight: string;     // DecimalField → string e.g. "0.3000" (30% contribution)
+  score: string;      // DecimalField → string e.g. "90.55" (out of 100)
+  weighted_score: string; // @property → string e.g. "27.17"
+}
+
+export interface CohortStats {
+  average:         number;
+  median:          number;
+  highest:         number;
+  lowest:          number;
+  total_students:  number;
+  distribution: {
+    "A":  number;
+    "A-": number;
+    "B+": number;
+    "B":  number;
+    "C+": number;
+    "C":  number;
+    "D+": number;
+    "D":  number;
+    "F":  number;
+  };
+}
+
+export interface Enrollment extends Timestamps {
+  id: number;
+  student: number;                  // FK → StudentProfile.id
+  course_class: NestedCourseClass;  // nested object
+  lecture_session: number | null;
+  tutorial_session: number | null;
+  lab_session: number | null;
+  grades: GradeEntry[];             // nested via related_name="grades"
+  final_percentage: number;         // @property — sum of raw scores
+  course_grade_points: number;      // @property — 0.0–4.0 GPA scale
+  cohort_stats: CohortStats | null;
+}
+
+// ─── records.models — Exam ───────────────────────────────────────────────────
+
+export type ExamType = "MIDTERM" | "FINAL" | "PRACTICAL" | "QUIZ";
+
+export interface Exam extends Timestamps {
+  id: number;
+  course_class: number;  // FK → CourseClass.id (flat PK)
+  course_code: string;   // denormalized by serializer
+  course_title: string;  // denormalized by serializer
+  exam_type: ExamType;
+  week: number;
+  max_score: string;     // DecimalField → string
+}
+
+export type ExamResultStatus = "PRESENT" | "ABSENT" | "EXCUSED" | "CHEATING";
+
+export interface ExamResult extends Timestamps {
+  id: number;
+  exam: number;          // FK → Exam.id
+  student: number;       // FK → StudentProfile.id
+  course_code: string;
+  course_title: string;
+  exam_type: ExamType;
+  exam_week: number;
+  max_score: string;
+  status: ExamResultStatus;
+  score: string | null;  // null = held but not yet graded
+}
+
+// ─── records.models — Assignment ─────────────────────────────────────────────
+
+export type AssignmentType = "HOMEWORK" | "PROJECT" | "ESSAY";
+
+export interface Assignment extends Timestamps {
+  id: number;
+  course_class: number;
+  course_code: string;
+  course_title: string;
+  assignment_type: AssignmentType;
+  due_week: number;
+  max_points: string;    // DecimalField → string
+}
+
+export interface StudentSubmission extends Timestamps {
+  id: number;
+  student: number;
+  assignment: number;
+  course_code: string;
+  course_title: string;
+  assignment_type: AssignmentType;
+  due_week: number;
+  max_points: string;
+  score: string | null;  // null = not yet graded
+  submitted_at: string;  // ISO-8601
+  is_late: boolean;      // @property
+}
+
+// ─── UI-layer derived types ───────────────────────────────────────────────────
+
+/** Flat enrollment summary used in the Dashboard course table */
+export interface EnrollmentRow {
+  id: number;
+  course_code: string;
+  course_title: string;
+}
+
+/** Resolved "next class" data surfaced to the NextClass status card */
+export interface NextClassInfo {
+  sessionId: number;
+  sessionType: SessionType;
+  courseCode: string;   // flat from ScheduleSessionSerializer
+  courseName: string;   // flat from ScheduleSessionSerializer
+  room: string;         // flat string — room.name
+  timeslot: Timeslot;
+}
+</file>
+
+<file path="src/App.tsx">
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import UniversityPortal from './pages/Dashboard';
+import AuthPage from './pages/Authpage';
+
+const queryClient = new QueryClient();
+
+function SplashSpinner() {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', background: '#f5f3ff', gap: 20,
+    }}>
+      <svg width="48" height="48" viewBox="0 0 48 48"
+        style={{ animation: 'spin 0.9s linear infinite' }}>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="#ede9fe" strokeWidth="4" />
+        <path d="M24 4 A20 20 0 0 1 44 24" fill="none" stroke="#7c3aed"
+          strokeWidth="4" strokeLinecap="round" />
+      </svg>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+function AppRoutes() {
+  const { isAuthenticated, isLoading, handleLoginSuccess } = useAuth();
+
+  if (isLoading)       return <SplashSpinner />;
+  if (isAuthenticated) return <UniversityPortal />;
+  return <AuthPage onLoginSuccess={handleLoginSuccess} />;
+}
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </QueryClientProvider>
+  );
+}
+</file>
+
+<file path="src/courseColors.ts">
+// ─── Course code colour system ────────────────────────────────────────────────
+// Maps department prefixes (letters before the first space or digit)
+// to a { bg, color } theme used for course code pills across the portal.
+
+export interface CourseColorTheme {
+  bg:     string;   // pill background
+  color:  string;   // pill text / border
+  dot:    string;   // accent dot colour (used in timetable)
+}
+
+const PREFIX_MAP: Record<string, CourseColorTheme> = {
+  // ── Engineering & Science ────────────────────────────────────────────────
+  BME: { bg: "#ede9fe", color: "#6d28d9", dot: "#7c3aed" },   // Biomedical  — purple
+  MEC: { bg: "#d1fae5", color: "#065f46", dot: "#10b981" },   // Mechanical  — green
+  EEC: { bg: "#dbeafe", color: "#1e40af", dot: "#3b82f6" },   // Elec/Comms  — blue
+  CSE: { bg: "#e0f2fe", color: "#0369a1", dot: "#0ea5e9" },   // Computer Sc — sky
+  EMP: { bg: "#fce7f3", color: "#9d174d", dot: "#ec4899" },   // Engineering Math/Phys — pink
+  CHE: { bg: "#fef3c7", color: "#92400e", dot: "#f59e0b" },   // Chemistry   — amber
+  PHY: { bg: "#fef9c3", color: "#854d0e", dot: "#eab308" },   // Physics     — yellow
+  MIE: { bg: "#dcfce7", color: "#14532d", dot: "#22c55e" },   // Manufacturing — emerald
+  CIE: { bg: "#e0f2fe", color: "#075985", dot: "#0284c7" },   // Civil       — light blue
+  ARE: { bg: "#f0fdfa", color: "#134e4a", dot: "#0d9488" },   // Architecture — teal
+  ECE: { bg: "#ede9fe", color: "#5b21b6", dot: "#8b5cf6" },   // Electronics — violet
+  NET: { bg: "#dbeafe", color: "#1d4ed8", dot: "#2563eb" },   // Networks    — indigo
+  DB:  { bg: "#f0fdf4", color: "#166534", dot: "#16a34a" },   // Databases   — green
+  CS:  { bg: "#e0f2fe", color: "#0369a1", dot: "#0ea5e9" },   // CS generic  — sky
+
+  // ── Humanities & Social Sciences ─────────────────────────────────────────
+  HUM: { bg: "#fdf4ff", color: "#86198f", dot: "#d946ef" },   // Humanities  — fuchsia
+  TRN: { bg: "#fff7ed", color: "#9a3412", dot: "#ea580c" },   // Training    — orange
+  BUS: { bg: "#fff1f2", color: "#9f1239", dot: "#e11d48" },   // Business    — rose
+  SOC: { bg: "#fef2f2", color: "#7f1d1d", dot: "#dc2626" },   // Social Sci  — red
+  LAW: { bg: "#f0fdf4", color: "#14532d", dot: "#15803d" },   // Law         — dark green
+  ART: { bg: "#fdf4ff", color: "#7e22ce", dot: "#9333ea" },   // Arts        — purple
+
+  // ── Math ─────────────────────────────────────────────────────────────────
+  MATH: { bg: "#f0f9ff", color: "#075985", dot: "#0284c7" },  // Mathematics — sky
+  STA:  { bg: "#f0fdfa", color: "#115e59", dot: "#0f766e" },  // Statistics  — teal
+};
+
+// Fallback for unmapped prefixes
+const FALLBACK: CourseColorTheme = {
+  bg: "#f3f4f6", color: "#374151", dot: "#6b7280",
+};
+
+/**
+ * Given a course code like "BME 326", "HUM xE5", "MATH 301",
+ * extracts the alphabetic prefix and returns a colour theme.
+ */
+export function getCourseColorTheme(courseCode: string): CourseColorTheme {
+  // Extract all leading letters (stops at space, digit, or end)
+  const match = courseCode.trim().match(/^([A-Za-z]+)/);
+  if (!match) return FALLBACK;
+  const prefix = match[1].toUpperCase();
+  // Try exact match first, then shorten until found
+  if (PREFIX_MAP[prefix]) return PREFIX_MAP[prefix];
+  for (let len = prefix.length - 1; len >= 2; len--) {
+    const shortened = prefix.slice(0, len);
+    if (PREFIX_MAP[shortened]) return PREFIX_MAP[shortened];
+  }
+  return FALLBACK;
+}
+</file>
+
+<file path="src/index.css">
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-50 text-slate-900;
+}
+</file>
+
+</files>
