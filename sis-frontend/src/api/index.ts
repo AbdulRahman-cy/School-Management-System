@@ -1,9 +1,70 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "./auth";
 import type {
   StudentProfile, Enrollment, EnrollmentRow, Session,
   ExamResult, StudentSubmission, Exam, Assignment,
 } from "../types";
+
+// ─── Cohort API types ─────────────────────────────────────────────────────────
+
+export interface CohortCoordinator {
+  id: number;
+  name: string;
+}
+
+export interface CohortCourse {
+  id: number;
+  code: string;
+  title: string;
+}
+
+export interface CohortCourseClass {
+  id: number;
+  course: CohortCourse;
+  group_number: number;
+  coordinator: CohortCoordinator | null;
+}
+
+export interface CohortGroup {
+  id: number;
+  number: number;
+  capacity: number;
+}
+
+export interface CohortDiscipline {
+  id: number;
+  code: string;
+  name: string;
+  program_type: "GSP" | "SSP";
+}
+
+export interface CohortTerm {
+  id: number;
+  name: string;
+}
+
+export interface Cohort {
+  /** Composite key: "{discipline.id}_{term.id}_{year_level}" */
+  id: string;
+  discipline: CohortDiscipline;
+  term: CohortTerm;
+  year_level: number;
+  groups: CohortGroup[];
+  course_classes: CohortCourseClass[];
+}
+
+/**
+ * Payload sent to POST /api/academics/groups/bulk-cohort/
+ * Keys in coordinators use format: "{courseId}_{groupNumber}"
+ */
+export interface CohortBulkCreatePayload {
+  discipline_id: number;
+  term_id: number;
+  year_level: number;
+  groups: Array<{ number: number; capacity: number }>;
+  courses: number[];
+  coordinators: Record<string, number>;
+}
  
 // Re-export so existing imports `import { api } from "../api"` keep working.
 // Old code was `api.get("path")`, new code is the same — apiClient is identical
@@ -20,6 +81,7 @@ export const queryKeys = {
   submissions:    (studentId: number)                => ["submissions",   { student: studentId }] as const,
   upcomingExams:  (studentId: number)                => ["upcoming-exams",  { student: studentId }] as const,
   upcomingAssign: (studentId: number)                => ["upcoming-assign", { student: studentId }] as const,
+  cohorts:        ()                                 => ["cohorts"] as const,
 };
  
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
@@ -173,3 +235,36 @@ export function useUpcomingAssignments(studentId: number | null) {
     enabled:   ENABLED(studentId),
   });
 }
+
+// ─── Cohort fetchers ──────────────────────────────────────────────────────────
+
+async function fetchCohorts(): Promise<Cohort[]> {
+  const { data } = await apiClient.get<Cohort[]>("/academics/groups/cohorts/");
+  return data;
+}
+
+async function createCohort(payload: CohortBulkCreatePayload): Promise<unknown> {
+  const { data } = await apiClient.post("/academics/groups/bulk-cohort/", payload);
+  return data;
+}
+
+// ─── Cohort hooks ─────────────────────────────────────────────────────────────
+
+export function useCohorts() {
+  return useQuery({
+    queryKey:  queryKeys.cohorts(),
+    queryFn:   fetchCohorts,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useCreateCohort() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createCohort,
+    onSuccess: () => {
+      // Invalidate the cohorts list so the grid refreshes automatically
+      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+    },
+  });
+}

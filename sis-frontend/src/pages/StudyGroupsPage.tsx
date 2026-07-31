@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from "react";
 import type { ProgramType } from "../types";
 import { getCourseColorTheme } from "../courseColors";
+import { useCohorts, useCreateCohort } from "../api";
+import type { Cohort as APICohort, CohortBulkCreatePayload } from "../api";
+
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
 
@@ -22,9 +25,11 @@ interface UIStudyGroupSlot {
 }
 
 interface UICourse {
+  id: number;        // real DB PK — needed for the API payload
   code: string;
   title: string;
 }
+
 
 /** Key: `"${courseCode}_${groupLetter}"` → teacher id (0 = unassigned) */
 type CoordinatorMap = Record<string, number>;
@@ -55,20 +60,23 @@ const TERMS: UITerm[] = [
   { id: 3, name: "Fall 2027"   },
 ];
 
+// UICourse now carries a real DB id; keep codes matching those seeded in the DB.
+// The id values here are illustrative — the actual values come from the API.
 const COURSE_POOL: UICourse[] = [
-  { code: "CSE 101",  title: "Intro to Computer Science"  },
-  { code: "CSE 201",  title: "Data Structures"            },
-  { code: "CSE 301",  title: "Algorithms"                 },
-  { code: "MATH 101", title: "Calculus I"                 },
-  { code: "MATH 201", title: "Calculus II"                },
-  { code: "EMP 101",  title: "Engineering Mathematics"    },
-  { code: "BME 201",  title: "Bioinstrumentation"         },
-  { code: "EEC 101",  title: "Circuit Analysis"           },
-  { code: "MEC 101",  title: "Statics & Dynamics"         },
-  { code: "PHY 101",  title: "Physics I"                  },
-  { code: "HUM 101",  title: "Technical Writing"          },
-  { code: "DB 201",   title: "Database Systems"           },
+  { id: 1,  code: "CSE 101",  title: "Intro to Computer Science"  },
+  { id: 2,  code: "CSE 201",  title: "Data Structures"            },
+  { id: 3,  code: "CSE 301",  title: "Algorithms"                 },
+  { id: 4,  code: "MATH 101", title: "Calculus I"                 },
+  { id: 5,  code: "MATH 201", title: "Calculus II"                },
+  { id: 6,  code: "EMP 101",  title: "Engineering Mathematics"    },
+  { id: 7,  code: "BME 201",  title: "Bioinstrumentation"         },
+  { id: 8,  code: "EEC 101",  title: "Circuit Analysis"           },
+  { id: 9,  code: "MEC 101",  title: "Statics & Dynamics"         },
+  { id: 10, code: "PHY 101",  title: "Physics I"                  },
+  { id: 11, code: "HUM 101",  title: "Technical Writing"          },
+  { id: 12, code: "DB 201",   title: "Database Systems"           },
 ];
+
 
 const MOCK_TEACHERS = [
   { id: 1, name: "Dr. Ahmed Al-Rashid"  },
@@ -153,8 +161,53 @@ const PROGRAM_BADGE: Record<ProgramType, { bg: string; color: string; border: st
 
 function disciplineTheme(code: string) { return getCourseColorTheme(code); }
 
-function teacherName(id: number): string {
-  return MOCK_TEACHERS.find(t => t.id === id)?.name ?? "—";
+/** Convert group number (1-based) to letter (A, B, …). */
+function numToLetter(n: number): string {
+  return String.fromCharCode(64 + n); // 1→A, 2→B, …
+}
+
+/**
+ * Adapt an API Cohort to the local UICohort used by the card/modal components.
+ * Groups are ordered by number; coordinator map is built from course_classes.
+ */
+function adaptCohort(c: APICohort): UICohort {
+  const sorted = [...c.groups].sort((a, b) => a.number - b.number);
+  const groups: UIStudyGroupSlot[] = sorted.map(g => ({
+    letter: numToLetter(g.number),
+    capacity: g.capacity,
+  }));
+
+  // Collect unique courses from the classes list
+  const courseMap = new Map<string, UICourse>();
+  for (const cc of c.course_classes) {
+    if (!courseMap.has(cc.course.code)) {
+      courseMap.set(cc.course.code, { id: cc.course.id, code: cc.course.code, title: cc.course.title });
+    }
+  }
+
+  // Build coordinator map: "courseCode_groupLetter" → coordinatorId (0 if null)
+  const coordinators: CoordinatorMap = {};
+  for (const cc of c.course_classes) {
+    const letter = numToLetter(cc.group_number);
+    const key = `${cc.course.code}_${letter}`;
+    coordinators[key] = cc.coordinator?.id ?? 0;
+  }
+
+  return {
+    // UICohort.id is a number — use a stable numeric hash of the composite string
+    id: c.discipline.id * 10000 + c.term.id * 10 + c.year_level,
+    discipline: {
+      id: c.discipline.id,
+      name: c.discipline.name,
+      code: c.discipline.code,
+      program_type: c.discipline.program_type,
+    },
+    term: { id: c.term.id, name: c.term.name },
+    year_level: c.year_level,
+    groups,
+    courses: Array.from(courseMap.values()),
+    coordinators,
+  };
 }
 
 function nextGroupLetter(existing: UIStudyGroupSlot[]): string | null {
@@ -162,6 +215,7 @@ function nextGroupLetter(existing: UIStudyGroupSlot[]): string | null {
   for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") { if (!used.has(ch)) return ch; }
   return null;
 }
+
 
 // ─── Shared style tokens ──────────────────────────────────────────────────────
 
@@ -588,12 +642,21 @@ interface NewCohortForm {
   coordinatorAssignments: CoordinatorMap;
 }
 
-function NewCohortModal({ onClose, onSubmit, nextId }: { onClose: () => void; onSubmit: (c: UICohort) => void; nextId: number }) {
+function NewCohortModal({
+  onClose, onSubmit, nextId, submitCohort, isPending,
+}: {
+  onClose: () => void;
+  onSubmit: (c: UICohort) => void;
+  nextId: number;
+  submitCohort: (payload: CohortBulkCreatePayload, opts: { onSuccess: () => void; onError: (e: unknown) => void }) => void;
+  isPending: boolean;
+}) {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<NewCohortForm>({
     disciplineId: DISCIPLINES[0].id, termId: TERMS[0].id, year_level: 1,
     numGroups: 3, groupCapacity: 50, selectedCourseCodes: new Set(), coordinatorAssignments: {},
   });
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const STEPS = ["Cohort Metadata", "Study Groups", "Course Assignment", "Class Coordinators"];
 
@@ -608,8 +671,41 @@ function NewCohortModal({ onClose, onSubmit, nextId }: { onClose: () => void; on
     const discipline = DISCIPLINES.find(d => d.id === form.disciplineId)!;
     const term = TERMS.find(t => t.id === form.termId)!;
     const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".slice(0, form.numGroups).split("");
-    onSubmit({ id: nextId, discipline, term, year_level: form.year_level, groups: letters.map(l => ({ letter: l, capacity: form.groupCapacity })), courses: COURSE_POOL.filter(c => form.selectedCourseCodes.has(c.code)), coordinators: form.coordinatorAssignments });
+    const selectedCourses = COURSE_POOL.filter(c => form.selectedCourseCodes.has(c.code));
+
+    // Build the API payload — keys use courseId_groupNumber format
+    const groups = letters.map((_, i) => ({ number: i + 1, capacity: form.groupCapacity }));
+    const coordinatorsPayload: Record<string, number> = {};
+    for (const course of selectedCourses) {
+      letters.forEach((letter, i) => {
+        const uiKey = `${course.code}_${letter}`;
+        const teacherId = form.coordinatorAssignments[uiKey] ?? 0;
+        if (teacherId) {
+          coordinatorsPayload[`${course.id}_${i + 1}`] = teacherId;
+        }
+      });
+    }
+
+    const payload: CohortBulkCreatePayload = {
+      discipline_id: form.disciplineId,
+      term_id: form.termId,
+      year_level: form.year_level,
+      groups,
+      courses: selectedCourses.map(c => c.id),
+      coordinators: coordinatorsPayload,
+    };
+
+    setApiError(null);
+    submitCohort(payload, {
+      onSuccess: () => onClose(),
+      onError: (err: unknown) => {
+        const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+          ?? "Failed to create cohort. Please try again.";
+        setApiError(msg);
+      },
+    });
   }
+
 
   const previewLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".slice(0, Math.max(0, Math.min(form.numGroups, 26))).split("");
 
@@ -735,12 +831,23 @@ function NewCohortModal({ onClose, onSubmit, nextId }: { onClose: () => void; on
         </div>
 
         {/* Footer */}
-        <div style={{ padding: "14px 24px 18px", borderTop: "1px solid #f0eeff", display: "flex", gap: 10, flexShrink: 0 }}>
-          {step > 0 && <button onClick={() => setStep(s => s - 1)} style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "1.5px solid #ede9fe", background: "#faf5ff", color: "#64748b", fontFamily: "'Sora',sans-serif", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>← Back</button>}
-          <button onClick={() => { if (step < STEPS.length - 1) setStep(s => s + 1); else handleSubmit(); }} style={{ flex: 2, padding: "10px 0", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#7c3aed,#8b5cf6)", color: "#fff", fontFamily: "'Sora',sans-serif", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(124,58,237,0.28)", letterSpacing: ".2px" }}>
-            {step < STEPS.length - 1 ? "Next →" : "Create Cohort →"}
-          </button>
+        <div style={{ padding: "14px 24px 18px", borderTop: "1px solid #f0eeff", display: "flex", flexDirection: "column", gap: 10, flexShrink: 0 }}>
+          {apiError && (
+            <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fee2e2", border: "1px solid #fca5a5", color: "#b91c1c", fontSize: 11.5, fontWeight: 600, fontFamily: "'Sora',sans-serif" }}>
+              ✕ {apiError}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10 }}>
+            {step > 0 && <button onClick={() => setStep(s => s - 1)} disabled={isPending} style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "1.5px solid #ede9fe", background: "#faf5ff", color: "#64748b", fontFamily: "'Sora',sans-serif", fontSize: 13, fontWeight: 600, cursor: isPending ? "not-allowed" : "pointer", opacity: isPending ? 0.6 : 1 }}>← Back</button>}
+            <button
+              onClick={() => { if (step < STEPS.length - 1) setStep(s => s + 1); else handleSubmit(); }}
+              disabled={isPending}
+              style={{ flex: 2, padding: "10px 0", borderRadius: 10, border: "none", background: isPending ? "#a78bfa" : "linear-gradient(135deg,#7c3aed,#8b5cf6)", color: "#fff", fontFamily: "'Sora',sans-serif", fontSize: 13, fontWeight: 700, cursor: isPending ? "not-allowed" : "pointer", boxShadow: "0 4px 14px rgba(124,58,237,0.28)", letterSpacing: ".2px", transition: "background .2s" }}>
+              {step < STEPS.length - 1 ? "Next →" : (isPending ? "Creating…" : "Create Cohort →")}
+            </button>
+          </div>
         </div>
+
       </div>
     </div>
   );
@@ -749,34 +856,41 @@ function NewCohortModal({ onClose, onSubmit, nextId }: { onClose: () => void; on
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function StudyGroupsPage() {
-  const [cohorts,    setCohorts]    = useState<UICohort[]>(INITIAL_COHORTS);
+  // ── Live data ──────────────────────────────────────────────────────────────
+  const { data: apiCohorts, isLoading, isError } = useCohorts();
+  const { mutate: submitCohort, isPending } = useCreateCohort();
+
+  // Adapt API cohorts to UI model; fall back to empty array while loading
+  const cohorts: UICohort[] = (apiCohorts ?? []).map(adaptCohort);
+
+  // Local-only state for the detail modal and toast
   const [modalOpen,  setModalOpen]  = useState(false);
   const [detailOpen, setDetailOpen] = useState<UICohort | null>(null);
   const [toast,      setToast]      = useState<{ msg: string; type: "success" | "error" | "warn" } | null>(null);
 
-  const nextId = cohorts.length > 0 ? Math.max(...cohorts.map(c => c.id)) + 1 : 1;
-
   function showToast(msg: string, type: "success" | "error" | "warn" = "success") { setToast({ msg, type }); }
 
-  function handleCreate(cohort: UICohort) {
-    setCohorts(prev => [cohort, ...prev]);
-    setModalOpen(false);
-    showToast("Cohort created successfully", "success");
-  }
+  /**
+   * Detail-modal CRUD still operates on local optimistic copies.
+   * On save the modal re-reads from the API cohort list via the adaptCohort bridge.
+   */
+  const [localOverrides, setLocalOverrides] = useState<Record<number, UICohort>>({});
+  const mergedCohorts = cohorts.map(c => localOverrides[c.id] ?? c);
 
   function handleUpdate(updated: UICohort) {
-    setCohorts(prev => prev.map(c => c.id === updated.id ? updated : c));
+    setLocalOverrides(prev => ({ ...prev, [updated.id]: updated }));
     setDetailOpen(updated);
   }
 
   function handleDeleteCohort(id: number) {
-    setCohorts(prev => prev.filter(c => c.id !== id));
+    setLocalOverrides(prev => { const next = { ...prev }; delete next[id]; return next; });
     setDetailOpen(null);
     showToast("Cohort deleted", "error");
   }
 
-  const totalGroups   = cohorts.reduce((s, c) => s + c.groups.length, 0);
-  const totalCapacity = cohorts.reduce((s, c) => s + c.groups.reduce((g, gr) => g + gr.capacity, 0), 0);
+  const totalGroups   = mergedCohorts.reduce((s, c) => s + c.groups.length, 0);
+  const totalCapacity = mergedCohorts.reduce((s, c) => s + c.groups.reduce((g, gr) => g + gr.capacity, 0), 0);
+  const nextId = mergedCohorts.length > 0 ? Math.max(...mergedCohorts.map(c => c.id)) + 1 : 1;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, fontFamily: "'Sora',sans-serif" }}>
@@ -784,7 +898,9 @@ export default function StudyGroupsPage() {
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px", margin: 0 }}>Study Groups</h1>
-          <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>{cohorts.length} cohort{cohorts.length !== 1 ? "s" : ""} · Manage cohort assignments and class sections</p>
+          <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
+            {isLoading ? "Loading cohorts…" : `${mergedCohorts.length} cohort${mergedCohorts.length !== 1 ? "s" : ""} · Manage cohort assignments and class sections`}
+          </p>
         </div>
         <button id="btn-new-cohort" onClick={() => setModalOpen(true)}
           style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 18px", borderRadius: 11, border: "none", background: "linear-gradient(135deg,#7c3aed,#8b5cf6)", color: "#fff", fontFamily: "'Sora',sans-serif", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(124,58,237,0.28)", letterSpacing: ".1px", transition: "box-shadow .2s ease, transform .2s ease", flexShrink: 0 }}
@@ -797,7 +913,7 @@ export default function StudyGroupsPage() {
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
         {[
-          { label: "Total Cohorts",  value: cohorts.length, accent: "#7c3aed", bg: "#faf5ff" },
+          { label: "Total Cohorts",  value: mergedCohorts.length, accent: "#7c3aed", bg: "#faf5ff" },
           { label: "Total Groups",   value: totalGroups,    accent: "#0ea5e9", bg: "#f0f9ff" },
           { label: "Total Capacity", value: totalCapacity,  accent: "#10b981", bg: "#f0fdf4" },
         ].map(s => (
@@ -813,23 +929,62 @@ export default function StudyGroupsPage() {
         ))}
       </div>
 
-      {/* Grid */}
-      {cohorts.length === 0 ? (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300 }}>
-          <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 20, border: "1px solid #ede9fe", boxShadow: "0 24px 64px rgba(124,58,237,0.08)" }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>📚</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#1e1b4b" }}>No cohorts yet</div>
-            <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>Click "+ New Cohort" to create your first cohort.</div>
-          </div>
-        </div>
-      ) : (
+      {/* Loading skeleton grid */}
+      {isLoading && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 22 }}>
-          {cohorts.map(cohort => <CohortCard key={cohort.id} cohort={cohort} onOpen={() => setDetailOpen(cohort)} />)}
+          {[1, 2, 3].map(i => (
+            <div key={i} style={{ background: "#fff", borderRadius: 18, border: "1.5px solid #f0eeff", overflow: "hidden", height: 280 }}>
+              <div style={{ height: 120, background: "linear-gradient(135deg,#f0eeff,#e9e4ff)", animation: "pulse 1.6s ease-in-out infinite" }} />
+              <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ height: 20, width: "60%", borderRadius: 6, background: "#f0eeff", animation: "pulse 1.6s ease-in-out infinite" }} />
+                <div style={{ height: 52, borderRadius: 10, background: "#f8f4ff", animation: "pulse 1.6s ease-in-out infinite" }} />
+                <div style={{ display: "flex", gap: 6 }}>
+                  {[1, 2, 3].map(j => <div key={j} style={{ height: 20, width: 52, borderRadius: 5, background: "#f0eeff", animation: "pulse 1.6s ease-in-out infinite" }} />)}
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
+      {/* Error state */}
+      {isError && !isLoading && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 200 }}>
+          <div style={{ textAlign: "center", padding: "32px 40px", background: "#fff", borderRadius: 20, border: "1px solid #fee2e2", boxShadow: "0 24px 64px rgba(239,68,68,0.08)" }}>
+            <div style={{ fontSize: 32, marginBottom: 10 }}>⚠️</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#b91c1c" }}>Failed to load cohorts</div>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6 }}>Check your network connection and try again.</div>
+          </div>
+        </div>
+      )}
+
+      {/* Cohort grid */}
+      {!isLoading && !isError && (
+        mergedCohorts.length === 0 ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300 }}>
+            <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 20, border: "1px solid #ede9fe", boxShadow: "0 24px 64px rgba(124,58,237,0.08)" }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>📚</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#1e1b4b" }}>No cohorts yet</div>
+              <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>Click "+ New Cohort" to create your first cohort.</div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 22 }}>
+            {mergedCohorts.map(cohort => <CohortCard key={cohort.id} cohort={cohort} onOpen={() => setDetailOpen(cohort)} />)}
+          </div>
+        )
+      )}
+
       {detailOpen && <CohortDetailModal cohort={detailOpen} onClose={() => setDetailOpen(null)} onUpdate={handleUpdate} onDelete={handleDeleteCohort} onToast={showToast} />}
-      {modalOpen && <NewCohortModal onClose={() => setModalOpen(false)} onSubmit={handleCreate} nextId={nextId} />}
+      {modalOpen && (
+        <NewCohortModal
+          onClose={() => setModalOpen(false)}
+          onSubmit={() => setModalOpen(false)}
+          nextId={nextId}
+          submitCohort={(payload, opts) => submitCohort(payload, opts)}
+          isPending={isPending}
+        />
+      )}
       {toast && <Toast message={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
     </div>
   );
