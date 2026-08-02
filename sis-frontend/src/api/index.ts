@@ -5,6 +5,39 @@ import type {
   ExamResult, StudentSubmission, Exam, Assignment,
 } from "../types";
 
+// ─── Reference data types (disciplines / terms / courses / teachers) ──────────
+
+export interface DisciplineOption {
+  id: number;
+  code: string;
+  name: string;
+  program_type: "GSP" | "SSP";
+}
+
+export interface TermOption {
+  id: number;
+  name: string;
+  start_date: string;
+  end_date: string;
+  is_active: boolean;
+}
+
+export interface CourseOption {
+  id: number;
+  code: string;
+  title: string;
+}
+
+import type { TeacherActiveCourseClass } from "../types";
+
+export interface TeacherOption {
+  id: number;
+  user_name: string; // "Full Name <email>" from StringRelatedField
+  user?: { id: number; email: string; first_name: string; last_name: string; role: string };
+  department_name?: string;
+  active_classes?: TeacherActiveCourseClass[];
+}
+
 // ─── Cohort API types ─────────────────────────────────────────────────────────
 
 export interface CohortCoordinator {
@@ -41,6 +74,7 @@ export interface CohortDiscipline {
 export interface CohortTerm {
   id: number;
   name: string;
+  is_active: boolean;
 }
 
 export interface Cohort {
@@ -81,7 +115,12 @@ export const queryKeys = {
   submissions:    (studentId: number)                => ["submissions",   { student: studentId }] as const,
   upcomingExams:  (studentId: number)                => ["upcoming-exams",  { student: studentId }] as const,
   upcomingAssign: (studentId: number)                => ["upcoming-assign", { student: studentId }] as const,
-  cohorts:        ()                                 => ["cohorts"] as const,
+  cohorts:          (status: string = "active", disciplineId?: number | null) => ["cohorts", { status, disciplineId }] as const,
+  blueprintCourses: (disciplineId?: number, yearLevel?: number, termId?: number)  => ["blueprint-courses", { disciplineId, yearLevel, termId }] as const,
+  disciplines:      ()                                                          => ["disciplines"] as const,
+  terms:          ()                                 => ["terms"] as const,
+  courses:        ()                                 => ["courses"] as const,
+  teachers:       ()                                 => ["teachers"] as const,
 };
  
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
@@ -236,10 +275,43 @@ export function useUpcomingAssignments(studentId: number | null) {
   });
 }
 
+// ─── Reference data fetchers ─────────────────────────────────────────────────
+
+async function fetchDisciplines(): Promise<DisciplineOption[]> {
+  const { data } = await apiClient.get<DisciplineOption[]>("/academics/disciplines/");
+  return data;
+}
+
+async function fetchTerms(): Promise<TermOption[]> {
+  const { data } = await apiClient.get<TermOption[]>("/academics/terms/");
+  return data;
+}
+
+async function fetchCourses(): Promise<CourseOption[]> {
+  const { data } = await apiClient.get<CourseOption[]>("/academics/courses/");
+  return data;
+}
+
+async function fetchTeachers(): Promise<TeacherOption[]> {
+  const { data } = await apiClient.get<TeacherOption[]>("/users/teachers/");
+  return data;
+}
+
 // ─── Cohort fetchers ──────────────────────────────────────────────────────────
 
-async function fetchCohorts(): Promise<Cohort[]> {
-  const { data } = await apiClient.get<Cohort[]>("/academics/groups/cohorts/");
+async function fetchCohorts(status: string = "active", disciplineId?: number | null): Promise<Cohort[]> {
+  const params: Record<string, string | number> = { term_status: status };
+  if (disciplineId) {
+    params.discipline_id = disciplineId;
+  }
+  const { data } = await apiClient.get<Cohort[]>("/academics/groups/cohorts/", { params });
+  return data;
+}
+
+async function fetchBlueprintCourses(disciplineId: number, yearLevel: number, termId: number): Promise<CourseOption[]> {
+  const { data } = await apiClient.get<CourseOption[]>("/academics/courses/", {
+    params: { discipline: disciplineId, year_level: yearLevel, term: termId },
+  });
   return data;
 }
 
@@ -248,12 +320,88 @@ async function createCohort(payload: CohortBulkCreatePayload): Promise<unknown> 
   return data;
 }
 
+async function deleteCohort(compositeId: string): Promise<void> {
+  await apiClient.delete(`/academics/groups/cohorts/${compositeId}/`);
+}
+
+// ─── Course-class & study-group granular fetchers ─────────────────────────────
+
+async function updateCourseClass({
+  id, payload,
+}: {
+  id: number;
+  payload: { coordinator_id?: number | null };
+}): Promise<unknown> {
+  const { data } = await apiClient.patch(`/academics/classes/${id}/`, payload);
+  return data;
+}
+
+async function deleteCourseClass(id: number): Promise<void> {
+  await apiClient.delete(`/academics/classes/${id}/`);
+}
+
+async function updateStudyGroup({
+  id, payload,
+}: {
+  id: number;
+  payload: { capacity?: number };
+}): Promise<unknown> {
+  const { data } = await apiClient.patch(`/academics/groups/${id}/`, payload);
+  return data;
+}
+
+async function deleteStudyGroup(id: number): Promise<void> {
+  await apiClient.delete(`/academics/groups/${id}/`);
+}
+
+// ─── Reference data hooks ─────────────────────────────────────────────────────
+
+export function useDisciplines() {
+  return useQuery({
+    queryKey:  queryKeys.disciplines(),
+    queryFn:   fetchDisciplines,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useTerms() {
+  return useQuery({
+    queryKey:  queryKeys.terms(),
+    queryFn:   fetchTerms,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCourses() {
+  return useQuery({
+    queryKey:  queryKeys.courses(),
+    queryFn:   fetchCourses,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useTeachers() {
+  return useQuery({
+    queryKey:  queryKeys.teachers(),
+    queryFn:   fetchTeachers,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useBlueprintCourses(disciplineId?: number, yearLevel?: number, termId?: number) {
+  return useQuery({
+    queryKey: queryKeys.blueprintCourses(disciplineId, yearLevel, termId),
+    queryFn: () => fetchBlueprintCourses(disciplineId!, yearLevel!, termId!),
+    enabled: !!disciplineId && !!yearLevel && !!termId,
+  });
+}
+
 // ─── Cohort hooks ─────────────────────────────────────────────────────────────
 
-export function useCohorts() {
+export function useCohorts(status: "active" | "all" = "active", disciplineId?: number | null) {
   return useQuery({
-    queryKey:  queryKeys.cohorts(),
-    queryFn:   fetchCohorts,
+    queryKey:  queryKeys.cohorts(status, disciplineId),
+    queryFn:   () => fetchCohorts(status, disciplineId),
     staleTime: 60 * 1000,
   });
 }
@@ -264,6 +412,58 @@ export function useCreateCohort() {
     mutationFn: createCohort,
     onSuccess: () => {
       // Invalidate the cohorts list so the grid refreshes automatically
+      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+    },
+  });
+}
+
+export function useDeleteCohort() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteCohort,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+    },
+  });
+}
+
+// ─── Course-class & study-group granular mutation hooks ───────────────────────
+
+export function useUpdateCourseClass() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: updateCourseClass,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+    },
+  });
+}
+
+export function useDeleteCourseClass() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteCourseClass,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+    },
+  });
+}
+
+export function useUpdateStudyGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: updateStudyGroup,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+    },
+  });
+}
+
+export function useDeleteStudyGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteStudyGroup,
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
     },
   });

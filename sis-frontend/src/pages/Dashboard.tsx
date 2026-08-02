@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useStudentProfile, useEnrollments, useStudentSessions, useUpcomingExams, useUpcomingAssignments } from "../api";
+import { useStudentProfile, useEnrollments, useStudentSessions, useUpcomingExams, useUpcomingAssignments, useTeachers } from "../api";
 import type { Enrollment, EnrollmentRow, Session, NextClassInfo } from "../types";
 import Attendance from "./Attendance";
 import CourseworkDashboard from "./CourseworkDashboard";
@@ -193,14 +193,22 @@ const ALL_STUDENT_NAV_ITEMS = [
 
 const PRESIDENT_EMAIL = "t.michelle.reyes0@alexu.edu.eg";
 
+import TeacherDashboard from "./TeacherDashboard";
+
 function getNavItems(user: { role: string; email: string } | null) {
   if (!user) return ALL_STUDENT_NAV_ITEMS;
   if (user.role === "STUDENT") return ALL_STUDENT_NAV_ITEMS;
   if (user.role === "TEACHER") {
     if (user.email === PRESIDENT_EMAIL) {
-      return [{ id: "study-groups", label: "Study Groups", icon: "⊞", group: "ADMIN" }];
+      return [
+        { id: "dashboard", label: "Teacher Dashboard", icon: "⊞", group: "" },
+        { id: "study-groups", label: "Study Groups", icon: "👥", group: "ADMIN" }
+      ];
     }
-    return [];
+    return [
+      { id: "dashboard", label: "Teacher Dashboard", icon: "⊞", group: "" },
+      { id: "study-groups", label: "Study Groups", icon: "👥", group: "ACADEMIC" }
+    ];
   }
   // ADMIN or other — show everything including study-groups
   return [
@@ -230,6 +238,33 @@ export default function UniversityPortal() {
   const { data: sessions,    isLoading: sessionsLoading, isError: sessionsError } = useStudentSessions(STUDENT_ID);
   const { data: upcomingExams }       = useUpcomingExams(STUDENT_ID);
   const { data: upcomingAssignments } = useUpcomingAssignments(STUDENT_ID);
+  const { data: teachers = [] }       = useTeachers();
+
+  const isTeacher = user?.role === "TEACHER";
+  const currentTeacher = useMemo(() => {
+    if (!isTeacher) return null;
+    return teachers.find(t => t.user?.email === user?.email || t.user_name.includes(user?.email ?? ""));
+  }, [teachers, user, isTeacher]);
+
+  const userFirstName = isTeacher
+    ? (user?.first_name || currentTeacher?.user?.first_name || "Teacher")
+    : (profile?.user?.first_name ?? "");
+
+  const userFullName = isTeacher
+    ? (user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : currentTeacher?.user_name || `${user?.first_name || ""} ${user?.last_name || ""}`.trim() || user?.email.split("@")[0] || "Teacher")
+    : (profile ? (profile.user.full_name || `${profile.user.first_name} ${profile.user.last_name}`.trim() || "—") : "—");
+
+  const userIdDisplay = isTeacher
+    ? (currentTeacher?.id ? `${currentTeacher.id}` : user?.id ? `${user.id}` : "1")
+    : (profile?.id ? String(profile.id) : "—");
+
+  const userDepartmentOrDiscipline = isTeacher
+    ? (currentTeacher?.department_name || "Faculty Member")
+    : (profile?.discipline?.name ?? "—");
+
+  const userInitials = isTeacher
+    ? (user?.first_name?.[0] && user?.last_name?.[0] ? `${user.first_name[0]}${user.last_name[0]}` : (user?.first_name?.[0] || "T"))
+    : (profile ? (`${profile.user.first_name?.[0] ?? ""}${profile.user.last_name?.[0] ?? ""}` || "?") : "…");
 
   if (profileError)  console.error("[useStudentProfile] failed");
   if (enrollError)   console.error("[useEnrollments] failed");
@@ -302,11 +337,11 @@ export default function UniversityPortal() {
     return () => document.removeEventListener("click", h);
   }, []);
 
-  const studentFirstName = profile?.user?.first_name ?? "";
-  const disciplineName   = profile?.discipline?.name ?? "—";
-  const studentIdDisplay = profile?.id ?? "—";
-  const initials         = profile ? (`${profile.user.first_name?.[0] ?? ""}${profile.user.last_name?.[0] ?? ""}` || "?") : "…";
-  const studentName      = profile ? (profile.user.full_name || `${profile.user.first_name} ${profile.user.last_name}`.trim() || "—") : "—";
+  const studentFirstName = userFirstName;
+  const disciplineName   = userDepartmentOrDiscipline;
+  const studentIdDisplay = userIdDisplay;
+  const initials         = userInitials;
+  const studentName      = userFullName;
   const topCourses       = profile?.top_courses ?? [];
 
   const nextClassDisplay = nextClass ? {
@@ -366,8 +401,8 @@ export default function UniversityPortal() {
           {!collapsed && (
             <div style={{ margin: "0 6px 10px", padding: "11px", background: "#faf5ff", borderRadius: 11, border: "1px solid #ede9fe" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 28, height: 28, borderRadius: 7, background: "linear-gradient(135deg,#7c3aed,#a78bfa)", color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{initials}</div>
-                <div>{profileLoading ? <Skeleton w={90} h={11} /> : <div style={{ fontSize: 11.5, fontWeight: 600, color: "#1e1b4b", whiteSpace: "nowrap" }}>{studentName}</div>}<div style={{ fontSize: 9, color: "#a78bfa", marginTop: 2 }}>ID {studentIdDisplay}</div></div>
+                <div style={{ width: 28, height: 28, borderRadius: 7, background: "linear-gradient(135deg,#7c3aed,#a78bfa)", color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{userInitials}</div>
+                <div>{profileLoading && !isTeacher ? <Skeleton w={90} h={11} /> : <div style={{ fontSize: 11.5, fontWeight: 600, color: "#1e1b4b", whiteSpace: "nowrap" }}>{userFullName}</div>}<div style={{ fontSize: 9, color: "#a78bfa", marginTop: 2 }}>ID {userIdDisplay}</div></div>
               </div>
             </div>
           )}
@@ -394,8 +429,8 @@ export default function UniversityPortal() {
             </button>
             <div style={{ position: "relative" }} data-profile-dd>
               <button onClick={() => setProfileOpen(v => !v)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 9px", border: "1.5px solid #ede9fe", borderRadius: 9, background: "transparent", cursor: "pointer", fontFamily: "inherit" }}>
-                <div style={{ width: 26, height: 26, borderRadius: 6, background: "linear-gradient(135deg,#7c3aed,#a78bfa)", color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{initials}</div>
-                <span style={{ fontSize: 12.5, color: "#1e1b4b", fontWeight: 500 }}>{studentFirstName || "…"}</span>
+                <div style={{ width: 26, height: 26, borderRadius: 6, background: "linear-gradient(135deg,#7c3aed,#a78bfa)", color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{userInitials}</div>
+                <span style={{ fontSize: 12.5, color: "#1e1b4b", fontWeight: 500 }}>{userFirstName || "…"}</span>
                 <span style={{ fontSize: 9, color: "#94a3b8" }}>▾</span>
               </button>
               {profileOpen && (
@@ -423,7 +458,9 @@ export default function UniversityPortal() {
           {/* Content */}
           <main style={{ flex: 1, padding: "22px", overflowY: "auto" }}>
 
-            {activeNav === "dashboard" ? (
+            {activeNav === "dashboard" && user?.role === "TEACHER" ? (
+              <TeacherDashboard />
+            ) : activeNav === "dashboard" ? (
               <>
                 <div className="ani0" style={{ marginBottom: 22 }}>
                   {profileLoading
@@ -776,7 +813,7 @@ export default function UniversityPortal() {
 
             ) : activeNav === "attendance" ? (
               /* ── Attendance page ─────────────────────────────────────── */
-              <Attendance studentId={STUDENT_ID} />
+              <Attendance />
 
             ) : activeNav === "study-groups" ? (
               <StudyGroupsPage />

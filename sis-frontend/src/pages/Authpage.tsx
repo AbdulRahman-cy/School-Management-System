@@ -570,7 +570,7 @@ function RegisterForm({
 
       <div>
         <Label>Role</Label>
-        <RoleSelect value={form.role} onChange={update('role')} error={errors.role} />
+        <RoleSelect value={form.role} onChange={(v) => setForm(f => ({ ...f, role: v }))} error={errors.role} />
       </div>
 
       <div>

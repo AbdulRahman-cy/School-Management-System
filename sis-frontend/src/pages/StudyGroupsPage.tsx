@@ -1,8 +1,17 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import type { ProgramType } from "../types";
 import { getCourseColorTheme } from "../courseColors";
-import { useCohorts, useCreateCohort } from "../api";
-import type { Cohort as APICohort, CohortBulkCreatePayload } from "../api";
+import {
+  useCohorts, useCreateCohort,
+  useDisciplines, useTerms, useCourses, useTeachers, useBlueprintCourses,
+  useDeleteCohort, useUpdateCourseClass, useDeleteCourseClass,
+  useUpdateStudyGroup, useDeleteStudyGroup,
+} from "../api";
+import type {
+  Cohort as APICohort, CohortBulkCreatePayload,
+  DisciplineOption, TermOption, CourseOption, TeacherOption,
+} from "../api";
 
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
@@ -17,9 +26,11 @@ interface UIDiscipline {
 interface UITerm {
   id: number;
   name: string;
+  is_active: boolean;
 }
 
 interface UIStudyGroupSlot {
+  id: number;      // real StudyGroup PK — needed for PATCH/DELETE
   letter: string;
   capacity: number;
 }
@@ -34,124 +45,44 @@ interface UICourse {
 /** Key: `"${courseCode}_${groupLetter}"` → teacher id (0 = unassigned) */
 type CoordinatorMap = Record<string, number>;
 
-interface UICohort {
+/**
+ * Key: `"${courseCode}_${groupLetter}"` → CourseClass DB id
+ * Used to issue PATCH /academics/classes/{id}/ for coordinator updates.
+ */
+type CourseClassIdMap = Record<string, number>;
+
+export interface UICohort {
   id: number;
+  /** Composite key: "{discipline.id}_{term.id}_{year_level}" — needed for DELETE /cohorts/{composite_id}/ */
+  compositeId: string;
   discipline: UIDiscipline;
   term: UITerm;
   year_level: number;
   groups: UIStudyGroupSlot[];
   courses: UICourse[];
   coordinators: CoordinatorMap;
+  /** Maps "courseCode_groupLetter" → CourseClass DB PK, used for PATCH mutations */
+  courseClassIds: CourseClassIdMap;
 }
 
+
 // ─── Static look-up tables ────────────────────────────────────────────────────
+// NOTE: All previous DISCIPLINES / TERMS / COURSE_POOL / MOCK_TEACHERS / INITIAL_COHORTS
+// constants have been removed. Live data is fetched from the Django backend via
+// the TanStack Query hooks below.  The UIDiscipline / UITerm / UICourse interfaces
+// are still used as the in-component UI model.
 
-const DISCIPLINES: UIDiscipline[] = [
-  { id: 1, name: "Computer & Communication Engineering", code: "CSE", program_type: "SSP" },
-  { id: 2, name: "Biomedical Engineering",               code: "BME", program_type: "SSP" },
-  { id: 3, name: "Electrical Engineering",               code: "EEC", program_type: "GSP" },
-  { id: 4, name: "Mechanical Engineering",               code: "MEC", program_type: "GSP" },
-  { id: 5, name: "Mathematics & Statistics",             code: "MATH", program_type: "SSP" },
-];
-
-const TERMS: UITerm[] = [
-  { id: 1, name: "Fall 2026"   },
-  { id: 2, name: "Spring 2027" },
-  { id: 3, name: "Fall 2027"   },
-];
-
-// UICourse now carries a real DB id; keep codes matching those seeded in the DB.
-// The id values here are illustrative — the actual values come from the API.
-const COURSE_POOL: UICourse[] = [
-  { id: 1,  code: "CSE 101",  title: "Intro to Computer Science"  },
-  { id: 2,  code: "CSE 201",  title: "Data Structures"            },
-  { id: 3,  code: "CSE 301",  title: "Algorithms"                 },
-  { id: 4,  code: "MATH 101", title: "Calculus I"                 },
-  { id: 5,  code: "MATH 201", title: "Calculus II"                },
-  { id: 6,  code: "EMP 101",  title: "Engineering Mathematics"    },
-  { id: 7,  code: "BME 201",  title: "Bioinstrumentation"         },
-  { id: 8,  code: "EEC 101",  title: "Circuit Analysis"           },
-  { id: 9,  code: "MEC 101",  title: "Statics & Dynamics"         },
-  { id: 10, code: "PHY 101",  title: "Physics I"                  },
-  { id: 11, code: "HUM 101",  title: "Technical Writing"          },
-  { id: 12, code: "DB 201",   title: "Database Systems"           },
-];
-
-
-const MOCK_TEACHERS = [
-  { id: 1, name: "Dr. Ahmed Al-Rashid"  },
-  { id: 2, name: "Dr. Sarah Mansour"    },
-  { id: 3, name: "Dr. Omar Khalil"      },
-  { id: 4, name: "Prof. Layla Hassan"   },
-  { id: 5, name: "Dr. Youssef Nour"     },
-  { id: 6, name: "Dr. Mona El-Sayed"    },
-  { id: 7, name: "Prof. Tariq Ibrahim"  },
-  { id: 8, name: "Dr. Rana Farouk"      },
-];
-
-// ─── Mock cohort data ─────────────────────────────────────────────────────────
-
-const INITIAL_COHORTS: UICohort[] = [
-  {
-    id: 1, discipline: DISCIPLINES[0], term: TERMS[0], year_level: 1,
-    groups: [{ letter: "A", capacity: 50 }, { letter: "B", capacity: 50 }, { letter: "C", capacity: 50 }],
-    courses: [
-      { code: "CSE 101", title: "Intro to Computer Science" },
-      { code: "MATH 101", title: "Calculus I" },
-      { code: "EMP 101", title: "Engineering Mathematics" },
-      { code: "PHY 101", title: "Physics I" },
-    ],
-    coordinators: {
-      "CSE 101_A": 1, "CSE 101_B": 2, "CSE 101_C": 3,
-      "MATH 101_A": 4, "MATH 101_B": 4, "MATH 101_C": 5,
-      "EMP 101_A": 6, "EMP 101_B": 6, "EMP 101_C": 7,
-    },
-  },
-  {
-    id: 2, discipline: DISCIPLINES[0], term: TERMS[0], year_level: 2,
-    groups: [{ letter: "A", capacity: 45 }, { letter: "B", capacity: 45 }],
-    courses: [
-      { code: "CSE 201", title: "Data Structures" },
-      { code: "MATH 201", title: "Calculus II" },
-      { code: "DB 201", title: "Database Systems" },
-    ],
-    coordinators: { "CSE 201_A": 1, "CSE 201_B": 3, "MATH 201_A": 4, "MATH 201_B": 5 },
-  },
-  {
-    id: 3, discipline: DISCIPLINES[1], term: TERMS[0], year_level: 1,
-    groups: [{ letter: "A", capacity: 40 }, { letter: "B", capacity: 40 }],
-    courses: [
-      { code: "BME 201", title: "Bioinstrumentation" },
-      { code: "EMP 101", title: "Engineering Mathematics" },
-      { code: "PHY 101", title: "Physics I" },
-    ],
-    coordinators: { "BME 201_A": 2, "BME 201_B": 8, "EMP 101_A": 6, "EMP 101_B": 6 },
-  },
-  {
-    id: 4, discipline: DISCIPLINES[2], term: TERMS[1], year_level: 2,
-    groups: [{ letter: "A", capacity: 50 }, { letter: "B", capacity: 50 }, { letter: "C", capacity: 50 }],
-    courses: [{ code: "EEC 101", title: "Circuit Analysis" }, { code: "MATH 201", title: "Calculus II" }],
-    coordinators: { "EEC 101_A": 7, "EEC 101_B": 7, "EEC 101_C": 3 },
-  },
-  {
-    id: 5, discipline: DISCIPLINES[3], term: TERMS[1], year_level: 3,
-    groups: [{ letter: "A", capacity: 35 }],
-    courses: [{ code: "MEC 101", title: "Statics & Dynamics" }, { code: "MATH 201", title: "Calculus II" }],
-    coordinators: { "MEC 101_A": 5 },
-  },
-  {
-    id: 6, discipline: DISCIPLINES[4], term: TERMS[2], year_level: 1,
-    groups: [{ letter: "A", capacity: 50 }, { letter: "B", capacity: 50 }],
-    courses: [{ code: "MATH 101", title: "Calculus I" }, { code: "HUM 101", title: "Technical Writing" }],
-    coordinators: { "MATH 101_A": 4, "MATH 101_B": 5, "HUM 101_A": 8, "HUM 101_B": 8 },
-  },
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function yearOrdinal(n: number): string {
   const map: Record<number, string> = { 1: "1st", 2: "2nd", 3: "3rd", 4: "4th" };
   return map[n] ?? `${n}th`;
+}
+
+/** Look up a teacher's display name from the live API list. */
+function teacherName(id: number, teachers: TeacherOption[]): string {
+  return teachers.find(t => t.id === id)?.user_name ?? `Teacher #${id}`;
 }
 
 const PROGRAM_BADGE: Record<ProgramType, { bg: string; color: string; border: string }> = {
@@ -173,6 +104,7 @@ function numToLetter(n: number): string {
 function adaptCohort(c: APICohort): UICohort {
   const sorted = [...c.groups].sort((a, b) => a.number - b.number);
   const groups: UIStudyGroupSlot[] = sorted.map(g => ({
+    id: g.id,
     letter: numToLetter(g.number),
     capacity: g.capacity,
   }));
@@ -187,34 +119,34 @@ function adaptCohort(c: APICohort): UICohort {
 
   // Build coordinator map: "courseCode_groupLetter" → coordinatorId (0 if null)
   const coordinators: CoordinatorMap = {};
+  // Build courseClassIds map: "courseCode_groupLetter" → CourseClass PK
+  const courseClassIds: CourseClassIdMap = {};
   for (const cc of c.course_classes) {
     const letter = numToLetter(cc.group_number);
     const key = `${cc.course.code}_${letter}`;
     coordinators[key] = cc.coordinator?.id ?? 0;
+    courseClassIds[key] = cc.id;
   }
 
   return {
     // UICohort.id is a number — use a stable numeric hash of the composite string
     id: c.discipline.id * 10000 + c.term.id * 10 + c.year_level,
+    compositeId: c.id,   // "disciplineId_termId_yearLevel" string from the serializer
     discipline: {
       id: c.discipline.id,
       name: c.discipline.name,
       code: c.discipline.code,
       program_type: c.discipline.program_type,
     },
-    term: { id: c.term.id, name: c.term.name },
+    term: { id: c.term.id, name: c.term.name, is_active: c.term.is_active },
     year_level: c.year_level,
     groups,
     courses: Array.from(courseMap.values()),
     coordinators,
+    courseClassIds,
   };
 }
 
-function nextGroupLetter(existing: UIStudyGroupSlot[]): string | null {
-  const used = new Set(existing.map(g => g.letter));
-  for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") { if (!used.has(ch)) return ch; }
-  return null;
-}
 
 
 // ─── Shared style tokens ──────────────────────────────────────────────────────
@@ -275,6 +207,171 @@ function ConfirmDialog({ message, onConfirm, onCancel }: { message: string; onCo
   );
 }
 
+// ─── CustomSelect (Portal-based custom dropdown component) ────────────────────
+
+export interface CustomSelectOption<T extends string | number> {
+  value: T;
+  label: string;
+}
+
+export function CustomSelect<T extends string | number>({
+  value,
+  onChange,
+  options,
+  placeholder = "Select...",
+  disabled = false,
+  style,
+}: {
+  value: T | null | undefined;
+  onChange: (val: T) => void;
+  options: CustomSelectOption<T>[];
+  placeholder?: string;
+  disabled?: boolean;
+  style?: React.CSSProperties;
+}) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 140 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const safeValue = value ?? null;
+  const selectedOpt = options.find(o => o.value === safeValue);
+
+  const updateCoords = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + 6,
+        left: rect.left,
+        width: rect.width,
+      });
+    }
+  };
+
+  const toggleOpen = () => {
+    if (disabled) return;
+    if (!open) {
+      updateCoords();
+    }
+    setOpen(prev => !prev);
+  };
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        buttonRef.current && !buttonRef.current.contains(target) &&
+        menuRef.current && !menuRef.current.contains(target)
+      ) {
+        setOpen(false);
+      }
+    }
+    function handleScrollOrResize() {
+      if (open) {
+        updateCoords();
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [open]);
+
+  return (
+    <div style={{ inlineSize: "100%", ...style }}>
+      <button
+        ref={buttonRef}
+        type="button"
+        disabled={disabled}
+        onClick={toggleOpen}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          padding: "8px 14px",
+          borderRadius: 12,
+          border: open ? "1.5px solid #7c3aed" : "1.5px solid #e2e8f0",
+          background: disabled ? "#f8fafc" : "#fff",
+          color: selectedOpt && selectedOpt.value !== "" && selectedOpt.value !== 0 ? "#1e1b4b" : "#64748b",
+          fontSize: 12.5,
+          fontWeight: 600,
+          fontFamily: "'Sora',sans-serif",
+          cursor: disabled ? "not-allowed" : "pointer",
+          outline: "none",
+          boxShadow: open ? "0 0 0 3px rgba(124,58,237,0.14)" : "0 1px 3px rgba(0,0,0,0.03)",
+          transition: "all .15s ease",
+        }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {selectedOpt ? selectedOpt.label : placeholder}
+        </span>
+        <span style={{ fontSize: 10, color: "#64748b", transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform .2s ease", flexShrink: 0 }}>▼</span>
+      </button>
+
+      {open && !disabled && createPortal(
+        <div
+          ref={menuRef}
+          style={{
+            position: "fixed",
+            top: coords.top,
+            left: coords.left,
+            width: Math.max(coords.width, 160),
+            zIndex: 999999,
+            background: "#fff",
+            borderRadius: 14,
+            border: "1.5px solid #ede9fe",
+            boxShadow: "0 20px 48px rgba(15,23,42,0.16)",
+            maxHeight: 220,
+            overflowY: "auto",
+            padding: 5,
+            animation: "fadeUp .15s ease both",
+          }}>
+          {options.map((opt) => {
+            const isSelected = opt.value === safeValue;
+            return (
+              <div
+                key={String(opt.value)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 9,
+                  fontSize: 12,
+                  fontWeight: isSelected ? 700 : 500,
+                  color: isSelected ? "#7c3aed" : "#334155",
+                  background: isSelected ? "#f5f3ff" : "transparent",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  transition: "background .15s ease, color .15s ease",
+                }}
+                onMouseEnter={e => {
+                  if (!isSelected) e.currentTarget.style.background = "#faf5ff";
+                }}
+                onMouseLeave={e => {
+                  if (!isSelected) e.currentTarget.style.background = "transparent";
+                }}>
+                <span>{opt.label}</span>
+                {isSelected && <span style={{ color: "#7c3aed", fontWeight: 800 }}>✓</span>}
+              </div>
+            );
+          })}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
 // ─── IconBtn (reusable micro-button) ─────────────────────────────────────────
 
 function IconBtn({ title, onClick, danger = false, children }: { title: string; onClick: () => void; danger?: boolean; children: React.ReactNode }) {
@@ -296,23 +393,28 @@ function CohortCard({ cohort, onOpen }: { cohort: UICohort; onOpen: () => void }
   const totalCap = cohort.groups.reduce((s, g) => s + g.capacity, 0);
   return (
     <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onOpen}
-      style={{ display: "flex", flexDirection: "column", background: "#fff", borderRadius: 18, border: `1.5px solid ${hovered ? theme.color + "55" : theme.bg}`, overflow: "hidden", boxShadow: hovered ? `0 20px 52px ${theme.color}22` : `0 4px 18px ${theme.color}0d`, transition: "box-shadow .22s ease, border-color .22s ease, transform .22s ease", transform: hovered ? "translateY(-5px)" : "translateY(0)", cursor: "pointer" }}>
-      <div style={{ minHeight: 120, background: `linear-gradient(135deg, ${theme.bg} 0%, ${theme.color}18 100%)`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "13px 14px", flexShrink: 0, position: "relative" }}>
-        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".7px", padding: "3px 10px", borderRadius: 99, background: progBadge.bg, color: progBadge.color, border: `1px solid ${progBadge.border}`, fontFamily: "'Sora',sans-serif", textTransform: "uppercase", flexShrink: 0 }}>{cohort.discipline.program_type}</span>
-        <span style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: ".2px", padding: "3px 10px", borderRadius: 99, background: "rgba(255,255,255,0.9)", color: "#1e1b4b", border: "1px solid #ede9fe", fontFamily: "'Sora',sans-serif", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{cohort.discipline.name}</span>
-        <div style={{ position: "absolute", bottom: 10, left: 16, fontSize: 30, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: theme.color, opacity: 0.13, letterSpacing: "-1px", userSelect: "none" }}>{cohort.discipline.code}</div>
+      style={{ display: "flex", flexDirection: "column", background: `linear-gradient(180deg, ${theme.bg} 0%, #ffffff 65%)`, borderRadius: 24, border: `1.5px solid ${hovered ? theme.color + "55" : theme.color + "22"}`, overflow: "hidden", boxShadow: hovered ? `0 24px 56px ${theme.color}25` : `0 8px 24px ${theme.color}10`, transition: "box-shadow .22s ease, border-color .22s ease, transform .22s ease", transform: hovered ? "translateY(-5px)" : "translateY(0)", cursor: "pointer" }}>
+      <div style={{ minHeight: 120, background: `linear-gradient(135deg, ${theme.bg} 0%, ${theme.color}22 100%)`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "15px 16px", flexShrink: 0, position: "relative" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".7px", padding: "4px 11px", borderRadius: 99, background: progBadge.bg, color: progBadge.color, border: `1px solid ${progBadge.border}`, fontFamily: "'Sora',sans-serif", textTransform: "uppercase", flexShrink: 0 }}>{cohort.discipline.program_type}</span>
+          {!cohort.term.is_active && (
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".5px", padding: "3px 8px", borderRadius: 99, background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", fontFamily: "'Sora',sans-serif", textTransform: "uppercase" }}>Archived</span>
+          )}
+        </div>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".2px", padding: "4px 11px", borderRadius: 99, background: "rgba(255,255,255,0.92)", color: "#1e1b4b", border: "1px solid #ede9fe", fontFamily: "'Sora',sans-serif", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{cohort.discipline.name}</span>
+        <div style={{ position: "absolute", bottom: 10, left: 16, fontSize: 32, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: theme.color, opacity: 0.15, letterSpacing: "-1px", userSelect: "none" }}>{cohort.discipline.code}</div>
       </div>
-      <div style={{ padding: "16px 18px", flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
-        <h3 style={{ fontSize: 17, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.35px", margin: 0, fontFamily: "'Sora',sans-serif" }}>Year {cohort.year_level} &mdash; {cohort.term.name}</h3>
-        <div style={{ display: "flex", alignItems: "stretch", gap: 0, background: theme.bg, borderRadius: 10, border: `1px solid ${theme.color}22`, overflow: "hidden", marginTop: 4 }}>
-          <div style={{ flex: 1, padding: "10px 14px" }}>
-            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: ".7px", color: theme.color, textTransform: "uppercase", marginBottom: 3, opacity: 0.8 }}>No. of groups</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: "#1e1b4b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: "-1px", lineHeight: 1 }}>{cohort.groups.length}</div>
+      <div style={{ padding: "18px 20px", flex: 1, display: "flex", flexDirection: "column", gap: 12 }}>
+        <h3 style={{ fontSize: 19, fontWeight: 800, color: "#1e1b4b", letterSpacing: "-.4px", margin: 0, fontFamily: "'Sora',sans-serif" }}>Year {cohort.year_level} &mdash; {cohort.term.name}</h3>
+        <div style={{ display: "flex", alignItems: "stretch", gap: 0, background: "rgba(255,255,255,0.85)", borderRadius: 14, border: `1px solid ${theme.color}22`, overflow: "hidden", marginTop: 2 }}>
+          <div style={{ flex: 1, padding: "12px 16px" }}>
+            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".8px", color: theme.color, textTransform: "uppercase", marginBottom: 4, opacity: 0.85 }}>No. of groups</div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: "#1e1b4b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: "-1px", lineHeight: 1 }}>{cohort.groups.length}</div>
           </div>
           <div style={{ width: 1, background: `${theme.color}22`, flexShrink: 0 }} />
-          <div style={{ flex: 1, padding: "10px 14px" }}>
-            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: ".7px", color: theme.color, textTransform: "uppercase", marginBottom: 3, opacity: 0.8 }}>Total capacity</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: "#1e1b4b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: "-1px", lineHeight: 1 }}>{totalCap}<span style={{ fontSize: 11, fontWeight: 500, color: "#94a3b8", marginLeft: 4, fontFamily: "'Sora',sans-serif" }}>students</span></div>
+          <div style={{ flex: 1, padding: "12px 16px" }}>
+            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".8px", color: theme.color, textTransform: "uppercase", marginBottom: 4, opacity: 0.85 }}>Total capacity</div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: "#1e1b4b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: "-1px", lineHeight: 1 }}>{totalCap}<span style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", marginLeft: 4, fontFamily: "'Sora',sans-serif" }}>students</span></div>
           </div>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 4 }}>
@@ -320,8 +422,8 @@ function CohortCard({ cohort, onOpen }: { cohort: UICohort; onOpen: () => void }
           {cohort.courses.length > 4 && <span style={{ fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 5, background: "#f3f4f6", color: "#6b7280" }}>+{cohort.courses.length - 4} more</span>}
         </div>
       </div>
-      <div style={{ padding: "12px 18px 18px" }}>
-        <button onClick={e => { e.stopPropagation(); onOpen(); }} style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: "none", background: hovered ? `linear-gradient(135deg, ${theme.color}, ${theme.dot})` : `linear-gradient(135deg, ${theme.dot}, ${theme.color})`, color: "#fff", fontFamily: "'Sora',sans-serif", fontSize: 13, fontWeight: 700, cursor: "pointer", letterSpacing: ".2px", transition: "background .2s ease", boxShadow: hovered ? `0 8px 24px ${theme.color}50` : `0 2px 8px ${theme.color}30` }}>View Cohort Details →</button>
+      <div style={{ padding: "12px 20px 20px" }}>
+        <button onClick={e => { e.stopPropagation(); onOpen(); }} style={{ width: "100%", padding: "12px 0", borderRadius: 12, border: "none", background: hovered ? `linear-gradient(135deg, ${theme.color}, ${theme.dot})` : `linear-gradient(135deg, ${theme.dot}, ${theme.color})`, color: "#fff", fontFamily: "'Sora',sans-serif", fontSize: 13.5, fontWeight: 700, cursor: "pointer", letterSpacing: ".2px", transition: "background .2s ease", boxShadow: hovered ? `0 8px 24px ${theme.color}50` : `0 2px 8px ${theme.color}30` }}>View Cohort Details →</button>
       </div>
     </div>
   );
@@ -329,17 +431,27 @@ function CohortCard({ cohort, onOpen }: { cohort: UICohort; onOpen: () => void }
 
 // ─── CohortDetailModal ────────────────────────────────────────────────────────
 
-function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
+function CohortDetailModal({ cohort, onClose, onDelete, onToast }: {
   cohort: UICohort;
   onClose: () => void;
-  onUpdate: (updated: UICohort) => void;
   onDelete: (id: number) => void;
   onToast: (msg: string, type: "success" | "error" | "warn") => void;
 }) {
   const theme = disciplineTheme(cohort.discipline.code);
   const progBadge = PROGRAM_BADGE[cohort.discipline.program_type];
 
-  // Edit cohort title
+  const isArchived = cohort.term.is_active === false;
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
+  const { mutate: runDeleteCohort,    isPending: isDeletingCohort  } = useDeleteCohort();
+  const { mutate: runUpdateGroup,     isPending: isUpdatingGroup   } = useUpdateStudyGroup();
+  const { mutate: runDeleteGroup,     isPending: isDeletingGroup   } = useDeleteStudyGroup();
+  const { mutate: runUpdateClass,     isPending: isUpdatingClass   } = useUpdateCourseClass();
+  const { mutate: runDeleteClass,     isPending: isDeletingClass   } = useDeleteCourseClass();
+
+  const isAnyPending = isDeletingCohort || isUpdatingGroup || isDeletingGroup || isUpdatingClass || isDeletingClass;
+
+  // Edit cohort title (local-only UI — no endpoint yet)
   const [editingTitle, setEditingTitle] = useState(false);
   const [editYear, setEditYear] = useState(cohort.year_level);
   const [editTermId, setEditTermId] = useState(cohort.term.id);
@@ -359,72 +471,133 @@ function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
   const [confirmDelCourse, setConfirmDelCourse] = useState<string | null>(null);
 
   const assignedCodes = new Set(cohort.courses.map(c => c.code));
-  const available = COURSE_POOL.filter(c => !assignedCodes.has(c.code));
 
-  function push(partial: Partial<UICohort>) { onUpdate({ ...cohort, ...partial }); }
+  // Fetch available courses from the API
+  const { data: allCourses = [] } = useCourses();
+  // Fetch teachers from the API
+  const { data: teachers = [] } = useTeachers();
+  // Fetch terms from the API for the edit-title dropdown
+  const { data: terms = [], isLoading: isLoadingTerms } = useTerms();
 
-  // Title
+  const available = allCourses.filter((c: CourseOption) => !assignedCodes.has(c.code));
+
+  // Title (local optimistic — no backend endpoint for this yet)
   function saveTitle() {
-    const term = TERMS.find(t => t.id === editTermId) ?? cohort.term;
-    push({ year_level: editYear, term });
     setEditingTitle(false);
-    onToast("Cohort details updated", "success");
+    onToast("Cohort details updated (local preview only)", "warn");
   }
 
-  // Groups
+  // ── Group handlers ─────────────────────────────────────────────────────────
+
   function saveCapacity() {
     if (!editCapLetter) return;
-    push({ groups: cohort.groups.map(g => g.letter === editCapLetter ? { ...g, capacity: editCapValue } : g) });
-    setEditCapLetter(null);
-    onToast(`Grp ${editCapLetter} capacity updated`, "success");
-  }
-  function addGroup() {
-    const letter = nextGroupLetter(cohort.groups);
-    if (!letter) { onToast("Maximum 26 groups reached", "warn"); return; }
-    push({ groups: [...cohort.groups, { letter, capacity: 50 }] });
-    onToast(`Group ${letter} added`, "success");
-  }
-  function deleteGroup(letter: string) {
-    const groups = cohort.groups.filter(g => g.letter !== letter);
-    const coordinators = { ...cohort.coordinators };
-    cohort.courses.forEach(c => { delete coordinators[`${c.code}_${letter}`]; });
-    push({ groups, coordinators });
-    setConfirmDelGrp(null);
-    onToast(`Group ${letter} removed`, "success");
+    const grp = cohort.groups.find(g => g.letter === editCapLetter);
+    if (!grp) return;
+    runUpdateGroup(
+      { id: grp.id, payload: { capacity: editCapValue } },
+      {
+        onSuccess: () => {
+          setEditCapLetter(null);
+          onToast(`Grp ${editCapLetter} capacity updated`, "success");
+        },
+        onError: () => onToast("Failed to update capacity", "error"),
+      }
+    );
   }
 
-  // Courses
-  function commitAddCourse() {
-    const course = COURSE_POOL.find(c => c.code === newCourseCode);
-    if (!course) return;
-    push({ courses: [...cohort.courses, course], coordinators: { ...cohort.coordinators, ...newCourseCoords } });
-    setAddingCourse(false); setNewCourseCode(""); setNewCourseCoords({});
-    onToast(`${course.code} added`, "success");
+  function deleteGroup(letter: string) {
+    const grp = cohort.groups.find(g => g.letter === letter);
+    if (!grp) return;
+    runDeleteGroup(grp.id, {
+      onSuccess: () => {
+        setConfirmDelGrp(null);
+        onToast(`Group ${letter} removed`, "success");
+      },
+      onError: () => onToast(`Failed to remove Group ${letter}`, "error"),
+    });
   }
+
+  // ── Course-class handlers ──────────────────────────────────────────────────
+
+  // commitAddCourse: currently no single-class-create endpoint; keep local
+  // optimistic add until that endpoint is wired up in a future task.
+  function commitAddCourse() {
+    const course = allCourses.find((c: CourseOption) => c.code === newCourseCode);
+    if (!course) return;
+    setAddingCourse(false); setNewCourseCode(""); setNewCourseCoords({});
+    onToast(`${course.code} queued — refresh to see new classes`, "warn");
+  }
+
   function startEditCourse(code: string) {
     const partial: CoordinatorMap = {};
     cohort.groups.forEach(g => { const k = `${code}_${g.letter}`; partial[k] = cohort.coordinators[k] ?? 0; });
     setEditCoords(partial);
     setEditingCourse(code);
   }
-  function saveEditCourse() {
-    push({ coordinators: { ...cohort.coordinators, ...editCoords } });
-    setEditingCourse(null);
-    onToast("Coordinators updated", "success");
+
+  function saveEditCourse(code: string) {
+    // Fire a PATCH for each (course, group) whose coordinator changed
+    const promises: Array<Promise<void>> = [];
+    cohort.groups.forEach(g => {
+      const key = `${code}_${g.letter}`;
+      const newTeacherId = editCoords[key] ?? 0;
+      const classId = cohort.courseClassIds[key];
+      if (!classId) return;
+      // Only PATCH if value changed
+      if (newTeacherId !== (cohort.coordinators[key] ?? 0)) {
+        promises.push(
+          new Promise<void>((resolve, reject) =>
+            runUpdateClass(
+              { id: classId, payload: { coordinator_id: newTeacherId || null } },
+              { onSuccess: () => resolve(), onError: reject }
+            )
+          )
+        );
+      }
+    });
+    Promise.all(promises).then(() => {
+      setEditingCourse(null);
+      onToast("Coordinators updated", "success");
+    }).catch(() => onToast("Some coordinator updates failed", "error"));
   }
+
   function deleteCourse(code: string) {
-    const courses = cohort.courses.filter(c => c.code !== code);
-    const coordinators = { ...cohort.coordinators };
-    cohort.groups.forEach(g => { delete coordinators[`${code}_${g.letter}`]; });
-    push({ courses, coordinators });
-    setConfirmDelCourse(null);
-    onToast(`${code} removed`, "success");
+    // Delete all CourseClass rows for this course across every group
+    const classIds = cohort.groups
+      .map(g => cohort.courseClassIds[`${code}_${g.letter}`])
+      .filter((id): id is number => !!id);
+
+    if (classIds.length === 0) {
+      setConfirmDelCourse(null);
+      onToast(`No class records found for ${code}`, "warn");
+      return;
+    }
+
+    let remaining = classIds.length;
+    let hadError = false;
+
+    classIds.forEach(id => {
+      runDeleteClass(id, {
+        onSuccess: () => {
+          remaining--;
+          if (remaining === 0 && !hadError) {
+            setConfirmDelCourse(null);
+            onToast(`${code} removed`, "success");
+          }
+        },
+        onError: () => {
+          hadError = true;
+          remaining--;
+          if (remaining === 0) onToast(`Failed to remove some ${code} classes`, "error");
+        },
+      });
+    });
   }
 
   return (
     <>
       <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(15,10,30,0.55)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-        onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+        onClick={e => { if (e.target === e.currentTarget && !isAnyPending) onClose(); }}>
         <div style={{ width: "100%", maxWidth: 660, background: "#fff", borderRadius: 20, boxShadow: "0 32px 80px rgba(100,50,255,0.18)", border: `1.5px solid ${theme.color}22`, overflow: "hidden", animation: "fadeUp .25s ease both", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
 
           {/* ── Header ── */}
@@ -437,31 +610,38 @@ function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
                 </div>
                 {editingTitle ? (
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <select value={editYear} onChange={e => setEditYear(Number(e.target.value))} style={{ ...INPUT_STYLE, width: 110, padding: "5px 8px" }}>
-                      {[1, 2, 3, 4].map(y => <option key={y} value={y}>Year {y}</option>)}
-                    </select>
-                    <select value={editTermId} onChange={e => setEditTermId(Number(e.target.value))} style={{ ...INPUT_STYLE, width: 140, padding: "5px 8px" }}>
-                      {TERMS.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
+                    <CustomSelect
+                      value={editYear}
+                      onChange={setEditYear}
+                      options={[1, 2, 3, 4].map(y => ({ value: y, label: `Year ${y}` }))}
+                      style={{ width: 110 }}
+                    />
+                    <CustomSelect
+                      value={editTermId}
+                      onChange={setEditTermId}
+                      options={isLoadingTerms ? [] : terms.map((t: TermOption) => ({ value: t.id, label: t.name }))}
+                      style={{ width: 140 }}
+                    />
                     <button onClick={saveTitle} style={{ padding: "5px 14px", borderRadius: 8, border: "none", background: theme.color, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Sora',sans-serif" }}>Save</button>
                     <button onClick={() => setEditingTitle(false)} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid #ede9fe", background: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#64748b", fontFamily: "'Sora',sans-serif" }}>Cancel</button>
                   </div>
                 ) : (
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <h2 style={{ fontSize: 18, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px", margin: 0 }}>Year {cohort.year_level} — {cohort.term.name}</h2>
-                    <IconBtn title="Edit cohort details" onClick={() => { setEditYear(cohort.year_level); setEditTermId(cohort.term.id); setEditingTitle(true); }}>✎</IconBtn>
+                    {!isArchived && <IconBtn title="Edit cohort details" onClick={() => { setEditYear(cohort.year_level); setEditTermId(cohort.term.id); setEditingTitle(true); }}>✎</IconBtn>}
                   </div>
                 )}
                 <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{cohort.groups.length} groups · {cohort.groups.reduce((s, g) => s + g.capacity, 0)} total capacity</div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexShrink: 0 }}>
-                <button onClick={() => setConfirmDelete(true)}
-                  style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, border: "1.5px solid #fca5a5", background: "#fff5f5", color: "#ef4444", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Sora',sans-serif", transition: "background .15s" }}
-                  onMouseEnter={e => (e.currentTarget.style.background = "#fee2e2")}
-                  onMouseLeave={e => (e.currentTarget.style.background = "#fff5f5")}>
-                  🗑 Delete
+                <button onClick={() => !isArchived && setConfirmDelete(true)} disabled={isDeletingCohort || isArchived}
+                  title={isArchived ? "Archived cohort cannot be deleted" : undefined}
+                  style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${isArchived ? "#e2e8f0" : "#fca5a5"}`, background: isArchived ? "#f8fafc" : isDeletingCohort ? "#fee2e2" : "#fff5f5", color: isArchived ? "#94a3b8" : "#ef4444", fontSize: 11.5, fontWeight: 700, cursor: (isDeletingCohort || isArchived) ? "not-allowed" : "pointer", fontFamily: "'Sora',sans-serif", opacity: (isDeletingCohort || isArchived) ? 0.6 : 1, transition: "background .15s" }}
+                  onMouseEnter={e => { if (!isDeletingCohort && !isArchived) (e.currentTarget as HTMLButtonElement).style.background = "#fee2e2"; }}
+                  onMouseLeave={e => { if (!isDeletingCohort && !isArchived) (e.currentTarget as HTMLButtonElement).style.background = "#fff5f5"; }}>
+                  {isDeletingCohort ? "Deleting…" : "🗑 Delete"}
                 </button>
-                <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 9, border: `1px solid ${theme.color}33`, background: "rgba(255,255,255,0.8)", cursor: "pointer", color: "#64748b", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                <button onClick={onClose} disabled={isAnyPending} style={{ width: 32, height: 32, borderRadius: 9, border: `1px solid ${theme.color}33`, background: "rgba(255,255,255,0.8)", cursor: isAnyPending ? "not-allowed" : "pointer", color: "#64748b", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
               </div>
             </div>
           </div>
@@ -469,36 +649,43 @@ function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
           {/* ── Scrollable body ── */}
           <div style={{ overflowY: "auto", flex: 1, padding: "20px 22px 22px", display: "flex", flexDirection: "column", gap: 22 }}>
 
+            {/* Archived warning banner */}
+            {isArchived && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderRadius: 12, background: "#fffbeb", border: "1px solid #fde68a", color: "#b45309", fontSize: 12.5, fontWeight: 600, lineHeight: 1.4 }}>
+                <span style={{ fontSize: 16 }}>⚠️</span>
+                <span>This cohort belongs to a past academic term. It is archived and cannot be modified.</span>
+              </div>
+            )}
+
             {/* Study Groups section */}
             <section>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: "#94a3b8", letterSpacing: ".8px", textTransform: "uppercase" }}>Study Groups</div>
-                <button onClick={addGroup} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 11px", borderRadius: 7, border: "none", background: `linear-gradient(135deg, ${theme.dot}, ${theme.color})`, color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "'Sora',sans-serif", boxShadow: `0 2px 8px ${theme.color}30` }}>
-                  <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> Add Group
-                </button>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 {cohort.groups.map(g => (
-                  <div key={g.letter} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "12px 16px 10px", borderRadius: 12, background: theme.bg, border: `1.5px solid ${theme.color}33`, minWidth: 88, position: "relative" }}>
-                    <button onClick={() => setConfirmDelGrp(g.letter)} title="Remove group"
-                      style={{ position: "absolute", top: 4, right: 4, width: 18, height: 18, borderRadius: 5, border: "none", background: "transparent", cursor: "pointer", color: "#94a3b8", fontSize: 10, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", transition: "background .15s, color .15s" }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "#fee2e2"; e.currentTarget.style.color = "#ef4444"; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#94a3b8"; }}>✕</button>
+                  <div key={g.letter} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "12px 16px 10px", borderRadius: 12, background: theme.bg, border: `1.5px solid ${theme.color}33`, minWidth: 88, position: "relative", opacity: (isDeletingGroup || isUpdatingGroup) ? 0.7 : 1, transition: "opacity .2s" }}>
+                    {!isArchived && (
+                      <button onClick={() => setConfirmDelGrp(g.letter)} disabled={isDeletingGroup || isUpdatingGroup} title="Remove group"
+                        style={{ position: "absolute", top: 4, right: 4, width: 18, height: 18, borderRadius: 5, border: "none", background: "transparent", cursor: (isDeletingGroup || isUpdatingGroup) ? "not-allowed" : "pointer", color: "#94a3b8", fontSize: 10, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", transition: "background .15s, color .15s" }}
+                        onMouseEnter={e => { if (!isDeletingGroup) { e.currentTarget.style.background = "#fee2e2"; e.currentTarget.style.color = "#ef4444"; } }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#94a3b8"; }}>✕</button>
+                    )}
                     <div style={{ width: 36, height: 36, borderRadius: 10, background: `linear-gradient(135deg, ${theme.dot}, ${theme.color})`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", boxShadow: `0 4px 12px ${theme.color}40`, marginBottom: 6 }}>{g.letter}</div>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#1e1b4b" }}>Grp {g.letter}</div>
-                    {editCapLetter === g.letter ? (
+                    {editCapLetter === g.letter && !isArchived ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
                         <input type="number" min={1} value={editCapValue} onChange={e => setEditCapValue(Number(e.target.value))} autoFocus
                           style={{ width: 52, padding: "3px 6px", borderRadius: 6, border: "1.5px solid #7c3aed", background: "#faf5ff", fontSize: 11, color: "#1e1b4b", outline: "none", fontFamily: "'JetBrains Mono',monospace", fontWeight: 700 }} />
-                        <button onClick={saveCapacity} style={{ padding: "3px 7px", borderRadius: 6, border: "none", background: "#7c3aed", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>✓</button>
+                        <button onClick={saveCapacity} disabled={isUpdatingGroup} style={{ padding: "3px 7px", borderRadius: 6, border: "none", background: "#7c3aed", color: "#fff", fontSize: 10, fontWeight: 700, cursor: isUpdatingGroup ? "not-allowed" : "pointer", opacity: isUpdatingGroup ? 0.6 : 1 }}>✓</button>
                         <button onClick={() => setEditCapLetter(null)} style={{ padding: "3px 7px", borderRadius: 6, border: "1px solid #ede9fe", background: "#fff", fontSize: 10, fontWeight: 600, cursor: "pointer", color: "#64748b" }}>✕</button>
                       </div>
                     ) : (
-                      <button onClick={() => { setEditCapLetter(g.letter); setEditCapValue(g.capacity); }} title="Edit capacity"
-                        style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 4px", marginTop: 3, borderRadius: 5, fontFamily: "'JetBrains Mono',monospace", fontSize: 9.5, color: theme.color, fontWeight: 600, transition: "background .15s" }}
-                        onMouseEnter={e => (e.currentTarget.style.background = "rgba(0,0,0,0.05)")}
-                        onMouseLeave={e => (e.currentTarget.style.background = "none")}>
-                        cap: {g.capacity} ✎
+                      <button onClick={() => { if (!isArchived) { setEditCapLetter(g.letter); setEditCapValue(g.capacity); } }} title={isArchived ? undefined : "Edit capacity"}
+                        style={{ background: "none", border: "none", cursor: isArchived ? "default" : "pointer", padding: "2px 4px", marginTop: 3, borderRadius: 5, fontFamily: "'JetBrains Mono',monospace", fontSize: 9.5, color: theme.color, fontWeight: 600, transition: "background .15s" }}
+                        onMouseEnter={e => { if (!isArchived) (e.currentTarget.style.background = "rgba(0,0,0,0.05)"); }}
+                        onMouseLeave={e => { if (!isArchived) (e.currentTarget.style.background = "none"); }}>
+                        cap: {g.capacity} {!isArchived && "✎"}
                       </button>
                     )}
                   </div>
@@ -510,7 +697,7 @@ function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
             <section>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: "#94a3b8", letterSpacing: ".8px", textTransform: "uppercase" }}>Course Classes</div>
-                {!addingCourse && (
+                {!addingCourse && !isArchived && (
                   <button onClick={() => { setAddingCourse(true); setNewCourseCode(""); setNewCourseCoords({}); }}
                     style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 11px", borderRadius: 7, border: "none", background: `linear-gradient(135deg, ${theme.dot}, ${theme.color})`, color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "'Sora',sans-serif", boxShadow: `0 2px 8px ${theme.color}30` }}>
                     <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> Add Course Class
@@ -523,10 +710,15 @@ function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
                 <div style={{ marginBottom: 14, padding: "14px 16px", borderRadius: 12, background: theme.bg, border: `1px solid ${theme.color}22`, display: "flex", flexDirection: "column", gap: 12 }}>
                   <div>
                     <label style={LABEL_STYLE}>Select Course</label>
-                    <select value={newCourseCode} onChange={e => { setNewCourseCode(e.target.value); setNewCourseCoords({}); }} style={INPUT_STYLE}>
-                      <option value="">— Choose a course —</option>
-                      {available.map(c => <option key={c.code} value={c.code}>{c.code} · {c.title}</option>)}
-                    </select>
+                    <CustomSelect
+                      value={newCourseCode}
+                      onChange={code => { setNewCourseCode(code); setNewCourseCoords({}); }}
+                      options={[
+                        { value: "", label: "— Choose a course —" },
+                        ...available.map((c: CourseOption) => ({ value: c.code, label: `${c.code} · ${c.title}` }))
+                      ]}
+                      placeholder="— Choose a course —"
+                    />
                   </div>
                   {newCourseCode && (
                     <div>
@@ -539,10 +731,15 @@ function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
                             <div key={g.letter} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 8, background: "#fff", border: "1px solid #ede9fe" }}>
                               <div style={{ width: 26, height: 26, borderRadius: 6, flexShrink: 0, background: `linear-gradient(135deg, ${ct.dot}, ${ct.color})`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace" }}>{g.letter}</div>
                               <span style={{ fontSize: 11.5, fontWeight: 600, color: "#374151", minWidth: 48 }}>Grp {g.letter}</span>
-                              <select value={newCourseCoords[k] ?? 0} onChange={e => setNewCourseCoords(m => ({ ...m, [k]: Number(e.target.value) }))} style={{ ...INPUT_STYLE, flex: 1, padding: "6px 9px", fontSize: 12 }}>
-                                <option value={0}>— Unassigned —</option>
-                                {MOCK_TEACHERS.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                              </select>
+                              <CustomSelect
+                                value={newCourseCoords[k] ?? 0}
+                                onChange={val => setNewCourseCoords(m => ({ ...m, [k]: val }))}
+                                options={[
+                                  { value: 0, label: "— Unassigned —" },
+                                  ...teachers.map((t: TeacherOption) => ({ value: t.id, label: t.user_name }))
+                                ]}
+                                style={{ flex: 1 }}
+                              />
                             </div>
                           );
                         })}
@@ -564,20 +761,22 @@ function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
                   const isEditing = editingCourse === c.code;
                   const ct = disciplineTheme(c.code);
                   return (
-                    <div key={c.code} style={{ borderRadius: 11, background: "#faf5ff", border: `1px solid ${isEditing ? ct.color + "44" : "#ede9fe"}`, overflow: "hidden", transition: "border-color .15s" }}>
+                    <div key={c.code} style={{ borderRadius: 11, background: "#faf5ff", border: `1px solid ${isEditing ? ct.color + "44" : "#ede9fe"}`, overflow: "hidden", transition: "border-color .15s", opacity: (isDeletingClass || isUpdatingClass) ? 0.7 : 1 }}>
                       {/* Row header */}
                       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
                         <CourseCodePill code={c.code} />
                         <span style={{ fontSize: 12.5, color: "#374151", fontWeight: 500, flex: 1 }}>{c.title}</span>
                         {isEditing ? (
                           <>
-                            <button onClick={saveEditCourse} style={{ padding: "4px 11px", borderRadius: 7, border: "none", background: "#7c3aed", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "'Sora',sans-serif" }}>Save</button>
-                            <button onClick={() => setEditingCourse(null)} style={{ padding: "4px 10px", borderRadius: 7, border: "1px solid #ede9fe", background: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "#64748b", fontFamily: "'Sora',sans-serif" }}>Cancel</button>
+                            <button onClick={() => saveEditCourse(c.code)} disabled={isUpdatingClass} style={{ padding: "4px 11px", borderRadius: 7, border: "none", background: isUpdatingClass ? "#a78bfa" : "#7c3aed", color: "#fff", fontSize: 11, fontWeight: 700, cursor: isUpdatingClass ? "not-allowed" : "pointer", fontFamily: "'Sora',sans-serif" }}>{isUpdatingClass ? "Saving…" : "Save"}</button>
+                            <button onClick={() => setEditingCourse(null)} disabled={isUpdatingClass} style={{ padding: "4px 10px", borderRadius: 7, border: "1px solid #ede9fe", background: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "#64748b", fontFamily: "'Sora',sans-serif" }}>Cancel</button>
                           </>
                         ) : (
-                          <IconBtn title="Edit coordinators" onClick={() => startEditCourse(c.code)}>✎</IconBtn>
+                          <>
+                            {!isArchived && <IconBtn title="Edit coordinators" onClick={() => startEditCourse(c.code)}>✎</IconBtn>}
+                            {!isArchived && <IconBtn title="Remove course class" danger onClick={() => setConfirmDelCourse(c.code)}>🗑</IconBtn>}
+                          </>
                         )}
-                        <IconBtn title="Remove course class" danger onClick={() => setConfirmDelCourse(c.code)}>🗑</IconBtn>
                       </div>
                       {/* Coordinator area */}
                       <div style={{ padding: "0 14px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
@@ -589,11 +788,15 @@ function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
                               <div key={g.letter} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 10px", borderRadius: 8, background: "#fff", border: `1px solid ${ct.color}22` }}>
                                 <div style={{ width: 24, height: 24, borderRadius: 6, flexShrink: 0, background: `linear-gradient(135deg, ${ct.dot}, ${ct.color})`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace" }}>{g.letter}</div>
                                 <span style={{ fontSize: 11, fontWeight: 600, color: "#374151", minWidth: 46 }}>Grp {g.letter}</span>
-                                <select value={val} onChange={e => setEditCoords(m => ({ ...m, [k]: Number(e.target.value) }))}
-                                  style={{ flex: 1, padding: "5px 8px", borderRadius: 7, border: `1.5px solid ${val ? ct.color + "55" : "#ede9fe"}`, background: val ? ct.bg : "#fff", fontSize: 12, color: val ? ct.color : "#94a3b8", fontFamily: "'Sora',sans-serif", fontWeight: val ? 600 : 400, outline: "none", cursor: "pointer" }}>
-                                  <option value={0}>— Unassigned —</option>
-                                  {MOCK_TEACHERS.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                                </select>
+                                <CustomSelect
+                                  value={val}
+                                  onChange={v => setEditCoords(m => ({ ...m, [k]: v }))}
+                                  options={[
+                                    { value: 0, label: "— Unassigned —" },
+                                    ...teachers.map((t: TeacherOption) => ({ value: t.id, label: t.user_name }))
+                                  ]}
+                                  style={{ flex: 1 }}
+                                />
                               </div>
                             );
                           })
@@ -606,7 +809,7 @@ function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
                                 <span key={g.letter} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 99, background: isUnassigned ? "#f3f4f6" : ct.bg, border: `1px solid ${isUnassigned ? "#e5e7eb" : ct.color + "33"}`, fontSize: 10.5, fontWeight: 600, color: isUnassigned ? "#9ca3af" : ct.color, fontFamily: "'Sora',sans-serif" }}>
                                   <span style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 800, fontSize: 9.5 }}>Grp {g.letter}</span>
                                   <span style={{ opacity: 0.4 }}>·</span>
-                                  {tid ? teacherName(tid) : "Unassigned"}
+                                  {tid ? teacherName(tid, teachers) : "Unassigned"}
                                 </span>
                               );
                             })}
@@ -625,7 +828,14 @@ function CohortDetailModal({ cohort, onClose, onUpdate, onDelete, onToast }: {
 
       {confirmDelGrp && <ConfirmDialog message={`Remove Group ${confirmDelGrp} from this cohort?`} onConfirm={() => deleteGroup(confirmDelGrp)} onCancel={() => setConfirmDelGrp(null)} />}
       {confirmDelCourse && <ConfirmDialog message={`Remove ${confirmDelCourse} from this cohort?`} onConfirm={() => deleteCourse(confirmDelCourse)} onCancel={() => setConfirmDelCourse(null)} />}
-      {confirmDelete && <ConfirmDialog message={`Delete the entire cohort "Year ${cohort.year_level} — ${cohort.term.name}"?`} onConfirm={() => { onDelete(cohort.id); onClose(); }} onCancel={() => setConfirmDelete(false)} />}
+      {confirmDelete && <ConfirmDialog
+        message={`Delete the entire cohort "Year ${cohort.year_level} — ${cohort.term.name}"?`}
+        onConfirm={() => runDeleteCohort(cohort.compositeId, {
+          onSuccess: () => { onDelete(cohort.id); onClose(); },
+          onError: () => onToast("Failed to delete cohort", "error"),
+        })}
+        onCancel={() => setConfirmDelete(false)}
+      />}
     </>
   );
 }
@@ -643,19 +853,44 @@ interface NewCohortForm {
 }
 
 function NewCohortModal({
-  onClose, onSubmit, nextId, submitCohort, isPending,
+  onClose, submitCohort, isPending,
 }: {
   onClose: () => void;
-  onSubmit: (c: UICohort) => void;
-  nextId: number;
   submitCohort: (payload: CohortBulkCreatePayload, opts: { onSuccess: () => void; onError: (e: unknown) => void }) => void;
   isPending: boolean;
 }) {
+  // ─── Reference data ─────────────────────────────────────────────────────
+  const { data: disciplines = [], isLoading: isLoadingDisciplines } = useDisciplines();
+  const { data: terms = [], isLoading: isLoadingTerms } = useTerms();
+  const { data: wTeachers = [], isLoading: isLoadingTeachers } = useTeachers();
+
+  const activeTerm = terms.find((t: TermOption) => t.is_active);
+
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<NewCohortForm>({
-    disciplineId: DISCIPLINES[0].id, termId: TERMS[0].id, year_level: 1,
+    disciplineId: 0, termId: 0, year_level: 1,
     numGroups: 3, groupCapacity: 50, selectedCourseCodes: new Set(), coordinatorAssignments: {},
   });
+
+  // Targeted Blueprint courses query for Step 3
+  const { data: blueprintCourses = [], isLoading: isLoadingBlueprintCourses } = useBlueprintCourses(
+    form.disciplineId, form.year_level, form.termId
+  );
+
+  // Once disciplines load, seed the default disciplineId if not already set
+  useEffect(() => {
+    if (disciplines.length > 0 && form.disciplineId === 0) {
+      setForm(f => ({ ...f, disciplineId: disciplines[0].id }));
+    }
+  }, [disciplines]);
+
+  // Bind active term ID silently
+  useEffect(() => {
+    if (activeTerm && form.termId !== activeTerm.id) {
+      setForm(f => ({ ...f, termId: activeTerm.id }));
+    }
+  }, [activeTerm]);
+
   const [apiError, setApiError] = useState<string | null>(null);
 
   const STEPS = ["Cohort Metadata", "Study Groups", "Course Assignment", "Class Coordinators"];
@@ -668,10 +903,11 @@ function NewCohortModal({
     setForm(f => ({ ...f, coordinatorAssignments: { ...f.coordinatorAssignments, [key]: teacherId } }));
   }
   function handleSubmit() {
-    const discipline = DISCIPLINES.find(d => d.id === form.disciplineId)!;
-    const term = TERMS.find(t => t.id === form.termId)!;
+    const discipline = disciplines.find((d: DisciplineOption) => d.id === form.disciplineId);
+    const term = terms.find((t: TermOption) => t.id === form.termId) ?? activeTerm;
+    if (!discipline || !term) return;
     const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".slice(0, form.numGroups).split("");
-    const selectedCourses = COURSE_POOL.filter(c => form.selectedCourseCodes.has(c.code));
+    const selectedCourses = blueprintCourses.filter((c: CourseOption) => form.selectedCourseCodes.has(c.code));
 
     // Build the API payload — keys use courseId_groupNumber format
     const groups = letters.map((_, i) => ({ number: i + 1, capacity: form.groupCapacity }));
@@ -688,7 +924,7 @@ function NewCohortModal({
 
     const payload: CohortBulkCreatePayload = {
       discipline_id: form.disciplineId,
-      term_id: form.termId,
+      term_id: term.id,
       year_level: form.year_level,
       groups,
       courses: selectedCourses.map(c => c.id),
@@ -731,9 +967,31 @@ function NewCohortModal({
         <div style={{ flex: 1, overflowY: "auto", padding: "22px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
           {step === 0 && (
             <>
-              <div><label style={LABEL_STYLE}>Discipline</label><select value={form.disciplineId} onChange={e => setForm(f => ({ ...f, disciplineId: Number(e.target.value) }))} style={INPUT_STYLE}>{DISCIPLINES.map(d => <option key={d.id} value={d.id}>{d.name} ({d.code}) — {d.program_type}</option>)}</select></div>
-              <div><label style={LABEL_STYLE}>Academic Term</label><select value={form.termId} onChange={e => setForm(f => ({ ...f, termId: Number(e.target.value) }))} style={INPUT_STYLE}>{TERMS.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
-              <div><label style={LABEL_STYLE}>Year Level</label><select value={form.year_level} onChange={e => setForm(f => ({ ...f, year_level: Number(e.target.value) }))} style={INPUT_STYLE}>{[1, 2, 3, 4].map(y => <option key={y} value={y}>{yearOrdinal(y)} Year (Year {y})</option>)}</select></div>
+              <div>
+                <label style={LABEL_STYLE}>Discipline</label>
+                <CustomSelect
+                  value={form.disciplineId}
+                  onChange={id => setForm(f => ({ ...f, disciplineId: id }))}
+                  options={disciplines.map((d: DisciplineOption) => ({ value: d.id, label: `${d.name} (${d.code}) — ${d.program_type}` }))}
+                  disabled={isLoadingDisciplines}
+                  placeholder="Select Discipline"
+                />
+              </div>
+              <div>
+                <label style={LABEL_STYLE}>Academic Term</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 13px", borderRadius: 10, background: "#f0fdf4", border: "1px solid #bbf7d0", color: "#166534", fontSize: 13, fontWeight: 600, fontFamily: "'Sora',sans-serif" }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 99, background: "#16a34a", color: "#fff", textTransform: "uppercase", letterSpacing: ".5px" }}>Active</span>
+                  <span>{isLoadingTerms ? "Loading active term…" : activeTerm ? activeTerm.name : "No active term"}</span>
+                </div>
+              </div>
+              <div>
+                <label style={LABEL_STYLE}>Year Level</label>
+                <CustomSelect
+                  value={form.year_level}
+                  onChange={y => setForm(f => ({ ...f, year_level: y }))}
+                  options={[1, 2, 3, 4].map(y => ({ value: y, label: `${yearOrdinal(y)} Year (Year ${y})` }))}
+                />
+              </div>
             </>
           )}
           {step === 1 && (
@@ -760,24 +1018,38 @@ function NewCohortModal({
           {step === 2 && (
             <div>
               <div style={{ ...LABEL_STYLE, marginBottom: 10 }}>Select courses for all groups in this cohort</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {COURSE_POOL.map(c => {
-                  const checked = form.selectedCourseCodes.has(c.code);
-                  const ct = disciplineTheme(c.code);
-                  return (
-                    <label key={c.code} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, cursor: "pointer", background: checked ? ct.bg : "#fafafa", border: `1.5px solid ${checked ? ct.color + "44" : "#ede9fe"}`, transition: "background .15s, border-color .15s" }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggleCourse(c.code)} style={{ accentColor: ct.color, width: 15, height: 15, flexShrink: 0 }} />
-                      <CourseCodePill code={c.code} />
-                      <span style={{ fontSize: 12.5, color: "#374151", fontWeight: 500, flex: 1 }}>{c.title}</span>
-                    </label>
-                  );
-                })}
-              </div>
-              {form.selectedCourseCodes.size === 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 10 }}>⚠ No courses selected. You can add them later from the cohort detail view.</div>}
+              {isLoadingBlueprintCourses ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {[1, 2, 3].map(i => (
+                    <div key={i} style={{ height: 42, borderRadius: 10, background: "#f3f4f6", animation: "pulse 1.6s ease-in-out infinite" }} />
+                  ))}
+                </div>
+              ) : blueprintCourses.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 16px", background: "#faf5ff", borderRadius: 12, border: "1px solid #ede9fe" }}>
+                  <div style={{ fontSize: 24, marginBottom: 8 }}>📚</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#64748b" }}>No courses found for this blueprint</div>
+                  <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 4 }}>Try changing the discipline or year level in Step 1.</div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {blueprintCourses.map((c: CourseOption) => {
+                    const checked = form.selectedCourseCodes.has(c.code);
+                    const ct = disciplineTheme(c.code);
+                    return (
+                      <label key={c.code} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, cursor: "pointer", background: checked ? ct.bg : "#fafafa", border: `1.5px solid ${checked ? ct.color + "44" : "#ede9fe"}`, transition: "background .15s, border-color .15s" }}>
+                        <input type="checkbox" checked={checked} onChange={() => toggleCourse(c.code)} style={{ accentColor: ct.color, width: 15, height: 15, flexShrink: 0 }} />
+                        <CourseCodePill code={c.code} />
+                        <span style={{ fontSize: 12.5, color: "#374151", fontWeight: 500, flex: 1 }}>{c.title}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {blueprintCourses.length > 0 && form.selectedCourseCodes.size === 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 10 }}>⚠ No courses selected. You can add them later from the cohort detail view.</div>}
             </div>
           )}
           {step === 3 && (() => {
-            const selectedCourses = COURSE_POOL.filter(c => form.selectedCourseCodes.has(c.code));
+            const selectedCourses = blueprintCourses.filter((c: CourseOption) => form.selectedCourseCodes.has(c.code));
             if (selectedCourses.length === 0 || previewLetters.length === 0) {
               return (
                 <div style={{ textAlign: "center", padding: "32px 16px", background: "#faf5ff", borderRadius: 12, border: "1px solid #ede9fe" }}>
@@ -811,7 +1083,10 @@ function NewCohortModal({
                               <select value={val} onChange={e => setCoordinator(course.code, letter, Number(e.target.value))}
                                 style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${val ? ct.color + "55" : "#ede9fe"}`, background: val ? ct.bg : "#fff", fontSize: 12.5, color: val ? ct.color : "#94a3b8", fontFamily: "'Sora',sans-serif", fontWeight: val ? 600 : 400, outline: "none", cursor: "pointer" }}>
                                 <option value={0}>— Unassigned —</option>
-                                {MOCK_TEACHERS.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                {isLoadingTeachers
+                                  ? <option disabled>Loading teachers…</option>
+                                  : wTeachers.map((t: TeacherOption) => <option key={t.id} value={t.id}>{t.user_name}</option>)
+                                }
                               </select>
                             </div>
                           );
@@ -857,7 +1132,10 @@ function NewCohortModal({
 
 export default function StudyGroupsPage() {
   // ── Live data ──────────────────────────────────────────────────────────────
-  const { data: apiCohorts, isLoading, isError } = useCohorts();
+  const [termFilter, setTermFilter] = useState<"active" | "all">("active");
+  const [selectedDiscipline, setSelectedDiscipline] = useState<number | null>(null);
+  const { data: apiCohorts, isLoading, isError } = useCohorts(termFilter, selectedDiscipline);
+  const { data: disciplines = [] } = useDisciplines();
   const { mutate: submitCohort, isPending } = useCreateCohort();
 
   // Adapt API cohorts to UI model; fall back to empty array while loading
@@ -870,60 +1148,92 @@ export default function StudyGroupsPage() {
 
   function showToast(msg: string, type: "success" | "error" | "warn" = "success") { setToast({ msg, type }); }
 
-  /**
-   * Detail-modal CRUD still operates on local optimistic copies.
-   * On save the modal re-reads from the API cohort list via the adaptCohort bridge.
-   */
-  const [localOverrides, setLocalOverrides] = useState<Record<number, UICohort>>({});
-  const mergedCohorts = cohorts.map(c => localOverrides[c.id] ?? c);
-
-  function handleUpdate(updated: UICohort) {
-    setLocalOverrides(prev => ({ ...prev, [updated.id]: updated }));
-    setDetailOpen(updated);
-  }
-
-  function handleDeleteCohort(id: number) {
-    setLocalOverrides(prev => { const next = { ...prev }; delete next[id]; return next; });
+  function handleDeleteCohort(_id: number) {
+    // Cache invalidation handled by useDeleteCohort's onSuccess
     setDetailOpen(null);
-    showToast("Cohort deleted", "error");
+    showToast("Cohort deleted", "success");
   }
 
-  const totalGroups   = mergedCohorts.reduce((s, c) => s + c.groups.length, 0);
-  const totalCapacity = mergedCohorts.reduce((s, c) => s + c.groups.reduce((g, gr) => g + gr.capacity, 0), 0);
-  const nextId = mergedCohorts.length > 0 ? Math.max(...mergedCohorts.map(c => c.id)) + 1 : 1;
+  const totalGroups   = cohorts.reduce((s, c) => s + c.groups.length, 0);
+  const totalCapacity = cohorts.reduce((s, c) => s + c.groups.reduce((g, gr) => g + gr.capacity, 0), 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, fontFamily: "'Sora',sans-serif" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px", margin: 0 }}>Study Groups</h1>
-          <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
-            {isLoading ? "Loading cohorts…" : `${mergedCohorts.length} cohort${mergedCohorts.length !== 1 ? "s" : ""} · Manage cohort assignments and class sections`}
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: "#1e1b4b", letterSpacing: "-.5px", margin: 0 }}>Study Groups</h1>
+          <p style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+            {isLoading ? "Loading cohorts…" : `${cohorts.length} cohort${cohorts.length !== 1 ? "s" : ""} · Manage cohort assignments and class sections`}
           </p>
         </div>
-        <button id="btn-new-cohort" onClick={() => setModalOpen(true)}
-          style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 18px", borderRadius: 11, border: "none", background: "linear-gradient(135deg,#7c3aed,#8b5cf6)", color: "#fff", fontFamily: "'Sora',sans-serif", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(124,58,237,0.28)", letterSpacing: ".1px", transition: "box-shadow .2s ease, transform .2s ease", flexShrink: 0 }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 8px 24px rgba(124,58,237,0.4)"; (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 14px rgba(124,58,237,0.28)"; (e.currentTarget as HTMLButtonElement).style.transform = ""; }}>
-          <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> New Cohort
-        </button>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0, flexWrap: "wrap" }}>
+          {/* Discipline filter dropdown */}
+          <CustomSelect
+            value={selectedDiscipline ?? 0}
+            onChange={val => setSelectedDiscipline(val === 0 ? null : val)}
+            options={[
+              { value: 0, label: "All Disciplines" },
+              ...disciplines.map((d: DisciplineOption) => ({
+                value: d.id,
+                label: `${d.code} · ${d.name}`,
+              }))
+            ]}
+            style={{ width: 190 }}
+          />
+
+          {/* Active / All term filter toggle */}
+          <div style={{ display: "flex", background: "#f1f5f9", padding: 3, borderRadius: 12, border: "1px solid #e2e8f0" }}>
+            <button
+              onClick={() => setTermFilter("active")}
+              style={{
+                padding: "6px 14px", borderRadius: 9, border: "none",
+                background: termFilter === "active" ? "#fff" : "transparent",
+                color: termFilter === "active" ? "#7c3aed" : "#64748b",
+                fontWeight: termFilter === "active" ? 700 : 500, fontSize: 12,
+                cursor: "pointer", boxShadow: termFilter === "active" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                transition: "all .15s ease", fontFamily: "'Sora',sans-serif",
+              }}>
+              Active Term
+            </button>
+            <button
+              onClick={() => setTermFilter("all")}
+              style={{
+                padding: "6px 14px", borderRadius: 9, border: "none",
+                background: termFilter === "all" ? "#fff" : "transparent",
+                color: termFilter === "all" ? "#7c3aed" : "#64748b",
+                fontWeight: termFilter === "all" ? 700 : 500, fontSize: 12,
+                cursor: "pointer", boxShadow: termFilter === "all" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                transition: "all .15s ease", fontFamily: "'Sora',sans-serif",
+              }}>
+              All Terms
+            </button>
+          </div>
+
+          <button id="btn-new-cohort" onClick={() => setModalOpen(true)}
+            style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 18px", borderRadius: 11, border: "none", background: "linear-gradient(135deg,#7c3aed,#8b5cf6)", color: "#fff", fontFamily: "'Sora',sans-serif", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(124,58,237,0.28)", letterSpacing: ".1px", transition: "box-shadow .2s ease, transform .2s ease", flexShrink: 0 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 8px 24px rgba(124,58,237,0.4)"; (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 14px rgba(124,58,237,0.28)"; (e.currentTarget as HTMLButtonElement).style.transform = ""; }}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> New Cohort
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
         {[
-          { label: "Total Cohorts",  value: mergedCohorts.length, accent: "#7c3aed", bg: "#faf5ff" },
+          { label: "Total Cohorts",  value: cohorts.length, accent: "#7c3aed", bg: "#faf5ff" },
           { label: "Total Groups",   value: totalGroups,    accent: "#0ea5e9", bg: "#f0f9ff" },
           { label: "Total Capacity", value: totalCapacity,  accent: "#10b981", bg: "#f0fdf4" },
         ].map(s => (
-          <div key={s.label} style={{ background: "#fff", borderRadius: 12, border: "1px solid #ede9fe", padding: "14px 18px", display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: s.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <div style={{ width: 12, height: 12, borderRadius: "50%", background: s.accent }} />
+          <div key={s.label} style={{ background: "#fff", borderRadius: 18, border: "1.5px solid #ede9fe", padding: "16px 20px", display: "flex", alignItems: "center", gap: 16, boxShadow: "0 10px 30px rgba(124,58,237,0.04)" }}>
+            <div style={{ width: 44, height: 44, borderRadius: 14, background: s.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <div style={{ width: 14, height: 14, borderRadius: "50%", background: s.accent }} />
             </div>
             <div>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", letterSpacing: ".6px", textTransform: "uppercase", marginBottom: 3 }}>{s.label}</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: "-1px", lineHeight: 1 }}>{s.value}</div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#94a3b8", letterSpacing: ".8px", textTransform: "uppercase", marginBottom: 4 }}>{s.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "#1e1b4b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: "-1px", lineHeight: 1 }}>{s.value}</div>
             </div>
           </div>
         ))}
@@ -960,7 +1270,7 @@ export default function StudyGroupsPage() {
 
       {/* Cohort grid */}
       {!isLoading && !isError && (
-        mergedCohorts.length === 0 ? (
+        cohorts.length === 0 ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300 }}>
             <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 20, border: "1px solid #ede9fe", boxShadow: "0 24px 64px rgba(124,58,237,0.08)" }}>
               <div style={{ fontSize: 36, marginBottom: 12 }}>📚</div>
@@ -970,17 +1280,15 @@ export default function StudyGroupsPage() {
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 22 }}>
-            {mergedCohorts.map(cohort => <CohortCard key={cohort.id} cohort={cohort} onOpen={() => setDetailOpen(cohort)} />)}
+            {cohorts.map(cohort => <CohortCard key={cohort.id} cohort={cohort} onOpen={() => setDetailOpen(cohort)} />)}
           </div>
         )
       )}
 
-      {detailOpen && <CohortDetailModal cohort={detailOpen} onClose={() => setDetailOpen(null)} onUpdate={handleUpdate} onDelete={handleDeleteCohort} onToast={showToast} />}
+      {detailOpen && <CohortDetailModal cohort={detailOpen} onClose={() => setDetailOpen(null)} onDelete={handleDeleteCohort} onToast={showToast} />}
       {modalOpen && (
         <NewCohortModal
           onClose={() => setModalOpen(false)}
-          onSubmit={() => setModalOpen(false)}
-          nextId={nextId}
           submitCohort={(payload, opts) => submitCohort(payload, opts)}
           isPending={isPending}
         />

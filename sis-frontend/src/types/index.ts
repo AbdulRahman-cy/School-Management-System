@@ -147,9 +147,12 @@ export type TeacherRank = "TA" | "LECTURER" | "ASST_PROF" | "ASSOC_PROF" | "PROF
 
 export interface TeacherProfile extends Timestamps {
   id: number;
-  user: number; // FK → BaseUser.id
-  department: number | null;
+  user: BaseUser;
+  user_name?: string;
+  department: Department | null;
+  department_name?: string;
   rank: TeacherRank;
+  active_classes?: TeacherActiveCourseClass[];
 }
 
 export interface StudentProfile extends Timestamps {
@@ -266,10 +269,18 @@ export interface StudentSubmission extends Timestamps {
   max_points: string;
   score: string | null;  // null = not yet graded
   submitted_at: string;  // ISO-8601
-  is_late: boolean;      // @property
 }
 
 // ─── UI-layer derived types ───────────────────────────────────────────────────
+
+export interface TeacherActiveCourseClass {
+  id: number;
+  course_code: string;
+  course_title: string;
+  group_number: number;
+  discipline_code: string;
+  term_name: string;
+}
 
 /** Flat enrollment summary used in the Dashboard course table */
 export interface EnrollmentRow {
