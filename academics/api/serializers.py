@@ -53,14 +53,30 @@ class StudyGroupSerializer(serializers.ModelSerializer):
 class CourseClassSerializer(serializers.ModelSerializer):
     course = CourseSerializer(read_only=True)
     group = StudyGroupSerializer(read_only=True)
+    
+    course_id = serializers.PrimaryKeyRelatedField(
+        queryset=Course.objects.all(), source='course', write_only=True, required=False
+    )
+    group_id = serializers.PrimaryKeyRelatedField(
+        queryset=StudyGroup.objects.all(), source='group', write_only=True, required=False
+    )
+    coordinator_id = serializers.PrimaryKeyRelatedField(
+        queryset=TeacherProfile.objects.all(),
+        source='coordinator',
+        allow_null=True,
+        required=False
+    )
 
     class Meta:
-        model  = CourseClass
+        model = CourseClass
         fields = [
             "id",
-            "course", 
-            "group",  
-            "created_at", 
+            "course",
+            "course_id",
+            "group",
+            "group_id",
+            "coordinator_id",
+            "created_at",
             "updated_at",
         ]
 
@@ -116,7 +132,7 @@ class CohortBulkCreateSerializer(serializers.Serializer):
         term         = validated_data["term_id"]          # resolved Term instance
         year_level   = validated_data["year_level"]
         groups_data  = validated_data["groups"]
-        course_ids   = validated_data["courses"]
+        courses = validated_data["courses"]
         coordinators = validated_data.get("coordinators", {})
 
         created_groups  = []
@@ -150,21 +166,15 @@ class CohortBulkCreateSerializer(serializers.Serializer):
                 created_groups.append(study_group)
 
             # ── Step 2: create CourseClass rows ───────────────────────────────
-            for course_id in course_ids:
+            for course in courses:
                 for group_number, study_group in group_map.items():
                     # Coordinator lookup key mirrors the frontend convention:
                     # "{course_id}_{group_number}"
-                    coord_key    = f"{course_id}_{group_number}"
-                    teacher_id   = coordinators.get(coord_key)  # may be None/0/missing
-                    coordinator  = None
-
-                    if teacher_id:  # falsy (0, None, "") → leave unassigned
-                        # TeacherProfile existence was already validated above;
-                        # use pk assignment to avoid an extra SELECT per row.
-                        coordinator = TeacherProfile(pk=int(teacher_id))
+                    coord_key    = f"{course.pk}_{group_number}"
+                    coordinator = coordinators.get(coord_key)
 
                     course_class = CourseClass.objects.create(
-                        course_id=course_id,
+                        course=course,
                         group=study_group,
                         coordinator=coordinator,
                     )

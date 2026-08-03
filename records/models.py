@@ -42,7 +42,7 @@ class Enrollment(TimestampedModel):
     )
     course_class = models.ForeignKey(
         "academics.CourseClass",
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="enrollments",
     )
     lecture_session = models.ForeignKey(

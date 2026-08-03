@@ -309,10 +309,19 @@ async function fetchCohorts(status: string = "active", disciplineId?: number | n
 }
 
 async function fetchBlueprintCourses(disciplineId: number, yearLevel: number, termId: number): Promise<CourseOption[]> {
-  const { data } = await apiClient.get<CourseOption[]>("/academics/courses/", {
-    params: { discipline: disciplineId, year_level: yearLevel, term: termId },
+  const { data } = await apiClient.get<CourseOption[] | { results: CourseOption[] }>("/academics/courses/", {
+    params: {
+      discipline_id: disciplineId,
+      discipline: disciplineId,
+      year_level: yearLevel,
+      term_id: termId,
+      term: termId,
+    },
   });
-  return data;
+  if (data && typeof data === "object" && "results" in data && Array.isArray((data as { results: CourseOption[] }).results)) {
+    return (data as { results: CourseOption[] }).results;
+  }
+  return Array.isArray(data) ? data : [];
 }
 
 async function createCohort(payload: CohortBulkCreatePayload): Promise<unknown> {
@@ -321,7 +330,22 @@ async function createCohort(payload: CohortBulkCreatePayload): Promise<unknown> 
 }
 
 async function deleteCohort(compositeId: string): Promise<void> {
-  await apiClient.delete(`/academics/groups/cohorts/${compositeId}/`);
+  try {
+    await apiClient.delete(`/academics/groups/cohorts/${compositeId}/`);
+  } catch (err: unknown) {
+    // 404 means the cohort is already gone — treat as success
+    if ((err as { response?: { status?: number } })?.response?.status === 404) return;
+    throw err;
+  }
+}
+
+async function createCourseClass(payload: {
+  course_id: number;
+  group_id: number;
+  coordinator_id?: number | null;
+}): Promise<unknown> {
+  const { data } = await apiClient.post("/academics/classes/", payload);
+  return data;
 }
 
 // ─── Course-class & study-group granular fetchers ─────────────────────────────
@@ -337,7 +361,13 @@ async function updateCourseClass({
 }
 
 async function deleteCourseClass(id: number): Promise<void> {
-  await apiClient.delete(`/academics/classes/${id}/`);
+  try {
+    await apiClient.delete(`/academics/classes/${id}/`);
+  } catch (err: unknown) {
+    // 404 means the class is already gone — treat as success
+    if ((err as { response?: { status?: number } })?.response?.status === 404) return;
+    throw err;
+  }
 }
 
 async function updateStudyGroup({
@@ -351,7 +381,26 @@ async function updateStudyGroup({
 }
 
 async function deleteStudyGroup(id: number): Promise<void> {
-  await apiClient.delete(`/academics/groups/${id}/`);
+  try {
+    await apiClient.delete(`/academics/groups/${id}/`);
+  } catch (err: unknown) {
+    // 404 means the group is already gone — treat as success
+    if ((err as { response?: { status?: number } })?.response?.status === 404) return;
+    throw err;
+  }
+}
+
+export interface AddStudyGroupPayload {
+  discipline_id: number;
+  term_id: number;
+  year_level: number;
+  number: number;
+  capacity?: number;
+}
+
+async function addStudyGroup(payload: AddStudyGroupPayload): Promise<unknown> {
+  const { data } = await apiClient.post("/academics/groups/add-group/", payload);
+  return data;
 }
 
 // ─── Reference data hooks ─────────────────────────────────────────────────────
@@ -411,18 +460,36 @@ export function useCreateCohort() {
   return useMutation({
     mutationFn: createCohort,
     onSuccess: () => {
-      // Invalidate the cohorts list so the grid refreshes automatically
-      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+      // Invalidate ALL cohort queries (prefix match) so the grid refreshes immediately
+      queryClient.invalidateQueries({ queryKey: ["cohorts"] });
     },
   });
 }
 
 export function useDeleteCohort() {
   const queryClient = useQueryClient();
+  // Use the bare ["cohorts"] prefix so it matches all active cohort queries
+  // regardless of their { status, disciplineId } params (null vs undefined mismatch).
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"] });
   return useMutation({
     mutationFn: deleteCohort,
+    onSuccess: invalidate,
+    // If a 404 somehow escapes the fetcher, still invalidate so the UI syncs
+    onError: (err: unknown) => {
+      if ((err as { response?: { status?: number } })?.response?.status === 404) {
+        invalidate();
+      }
+    },
+  });
+}
+
+export function useCreateCourseClass() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createCourseClass,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+      // Aggressively flush all cohort-related caches using prefix matching
+      queryClient.invalidateQueries({ queryKey: ["cohorts"] });
     },
   });
 }
@@ -434,17 +501,23 @@ export function useUpdateCourseClass() {
   return useMutation({
     mutationFn: updateCourseClass,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+      queryClient.invalidateQueries({ queryKey: ["cohorts"] });
     },
   });
 }
 
 export function useDeleteCourseClass() {
   const queryClient = useQueryClient();
+  // Use the bare ["cohorts"] prefix so it matches all active cohort queries
+  // regardless of their { status, disciplineId } params (null vs undefined mismatch).
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"] });
   return useMutation({
     mutationFn: deleteCourseClass,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+    onSuccess: invalidate,
+    onError: (err: unknown) => {
+      if ((err as { response?: { status?: number } })?.response?.status === 404) {
+        invalidate();
+      }
     },
   });
 }
@@ -454,17 +527,33 @@ export function useUpdateStudyGroup() {
   return useMutation({
     mutationFn: updateStudyGroup,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+      queryClient.invalidateQueries({ queryKey: ["cohorts"] });
     },
   });
 }
 
 export function useDeleteStudyGroup() {
   const queryClient = useQueryClient();
+  // Use the bare ["cohorts"] prefix so it matches all active cohort queries
+  // regardless of their { status, disciplineId } params (null vs undefined mismatch).
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"] });
   return useMutation({
     mutationFn: deleteStudyGroup,
+    onSuccess: invalidate,
+    onError: (err: unknown) => {
+      if ((err as { response?: { status?: number } })?.response?.status === 404) {
+        invalidate();
+      }
+    },
+  });
+}
+
+export function useAddStudyGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: addStudyGroup,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.cohorts() });
+      queryClient.invalidateQueries({ queryKey: ["cohorts"] });
     },
   });
 }

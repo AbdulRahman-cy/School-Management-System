@@ -37,28 +37,35 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        discipline_id = self.request.query_params.get("discipline") or self.request.query_params.get("discipline_id")
+        discipline_id = self.request.query_params.get("discipline_id") or self.request.query_params.get("discipline")
         year_level = self.request.query_params.get("year_level")
-        term_id = self.request.query_params.get("term") or self.request.query_params.get("term_id")
+        term_id = self.request.query_params.get("term_id") or self.request.query_params.get("term")
 
         if discipline_id and year_level and term_id:
             try:
                 term = Term.objects.get(id=term_id)
                 season = term.season
-                qs = qs.filter(
+                if season:
+                    season_qs = qs.filter(
+                        blueprints__discipline_id=discipline_id,
+                        blueprints__year_level=year_level,
+                        blueprints__season=season,
+                    ).distinct()
+                    if season_qs.exists():
+                        return season_qs
+                return qs.filter(
                     blueprints__discipline_id=discipline_id,
                     blueprints__year_level=year_level,
-                    blueprints__season=season,
                 ).distinct()
             except (Term.DoesNotExist, ValueError):
                 return qs.none()
         elif discipline_id and year_level:
-            qs = qs.filter(
+            return qs.filter(
                 blueprints__discipline_id=discipline_id,
                 blueprints__year_level=year_level,
             ).distinct()
         elif discipline_id:
-            qs = qs.filter(blueprints__discipline_id=discipline_id).distinct()
+            return qs.filter(blueprints__discipline_id=discipline_id).distinct()
         return qs
 
 class RoomViewSet(viewsets.ModelViewSet):   
@@ -131,6 +138,47 @@ class StudyGroupViewSet(viewsets.ModelViewSet):
                 "message": "Cohort created successfully",
                 **result  # Unpacks groups_created, classes_created, etc.
             },
+            status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=False, methods=["post"], url_path="add-group")
+    def add_study_group_to_cohort(self, request):
+        discipline_id = request.data.get("discipline_id")
+        term_id = request.data.get("term_id")
+        year_level = request.data.get("year_level")
+        number = request.data.get("number")
+        capacity = request.data.get("capacity", 50)
+
+        if not all([discipline_id, term_id, year_level, number]):
+            return Response(
+                {"detail": "Missing required fields."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with transaction.atomic():
+            study_group = StudyGroup.objects.create(
+                discipline_id=discipline_id,
+                term_id=term_id,
+                year_level=year_level,
+                number=number,
+                capacity=capacity
+            )
+            # Automatically clone existing course classes for this new group
+            existing_classes = CourseClass.objects.filter(
+                group__discipline_id=discipline_id,
+                group__term_id=term_id,
+                group__year_level=year_level
+            ).values('course_id').distinct()
+
+            for item in existing_classes:
+                CourseClass.objects.create(
+                    course_id=item['course_id'],
+                    group=study_group,
+                    coordinator=None
+                )
+
+        return Response(
+            {"message": "Study group added successfully", "id": study_group.pk},
             status=status.HTTP_201_CREATED
         )
 

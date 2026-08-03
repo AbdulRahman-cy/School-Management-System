@@ -66,12 +66,12 @@ class Session(TimestampedModel):
     )
     room         = models.ForeignKey(
         "academics.Room",
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="sessions",
     )
     timeslot     = models.ForeignKey(
         Timeslot,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE ,
         related_name="sessions",
     )
     session_type = models.CharField(

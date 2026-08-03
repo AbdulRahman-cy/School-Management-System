@@ -230,12 +230,107 @@ export async function tryRestoreSession(): Promise<AuthUser | null> {
 </file>
 
 <file path="src/api/index.ts">
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "./auth";
 import type {
   StudentProfile, Enrollment, EnrollmentRow, Session,
   ExamResult, StudentSubmission, Exam, Assignment,
 } from "../types";
+
+// ─── Reference data types (disciplines / terms / courses / teachers) ──────────
+
+export interface DisciplineOption {
+  id: number;
+  code: string;
+  name: string;
+  program_type: "GSP" | "SSP";
+}
+
+export interface TermOption {
+  id: number;
+  name: string;
+  start_date: string;
+  end_date: string;
+  is_active: boolean;
+}
+
+export interface CourseOption {
+  id: number;
+  code: string;
+  title: string;
+}
+
+import type { TeacherActiveCourseClass } from "../types";
+
+export interface TeacherOption {
+  id: number;
+  user_name: string; // "Full Name <email>" from StringRelatedField
+  user?: { id: number; email: string; first_name: string; last_name: string; role: string };
+  department_name?: string;
+  active_classes?: TeacherActiveCourseClass[];
+}
+
+// ─── Cohort API types ─────────────────────────────────────────────────────────
+
+export interface CohortCoordinator {
+  id: number;
+  name: string;
+}
+
+export interface CohortCourse {
+  id: number;
+  code: string;
+  title: string;
+}
+
+export interface CohortCourseClass {
+  id: number;
+  course: CohortCourse;
+  group_number: number;
+  coordinator: CohortCoordinator | null;
+}
+
+export interface CohortGroup {
+  id: number;
+  number: number;
+  capacity: number;
+}
+
+export interface CohortDiscipline {
+  id: number;
+  code: string;
+  name: string;
+  program_type: "GSP" | "SSP";
+}
+
+export interface CohortTerm {
+  id: number;
+  name: string;
+  is_active: boolean;
+}
+
+export interface Cohort {
+  /** Composite key: "{discipline.id}_{term.id}_{year_level}" */
+  id: string;
+  discipline: CohortDiscipline;
+  term: CohortTerm;
+  year_level: number;
+  groups: CohortGroup[];
+  course_classes: CohortCourseClass[];
+}
+
+/**
+ * Payload sent to POST /api/academics/groups/bulk-cohort/
+ * Keys in coordinators use format: "{courseId}_{groupNumber}"
+ */
+export interface CohortBulkCreatePayload {
+  discipline_id: number;
+  term_id: number;
+  year_level: number;
+  groups: Array<{ number: number; capacity: number }>;
+  courses: number[];
+  coordinators: Record<string, number>;
+}
  
 // Re-export so existing imports `import { api } from "../api"` keep working.
 // Old code was `api.get("path")`, new code is the same — apiClient is identical
@@ -252,6 +347,12 @@ export const queryKeys = {
   submissions:    (studentId: number)                => ["submissions",   { student: studentId }] as const,
   upcomingExams:  (studentId: number)                => ["upcoming-exams",  { student: studentId }] as const,
   upcomingAssign: (studentId: number)                => ["upcoming-assign", { student: studentId }] as const,
+  cohorts:          (status: string = "active", disciplineId?: number | null) => ["cohorts", { status, disciplineId }] as const,
+  blueprintCourses: (disciplineId?: number, yearLevel?: number, termId?: number)  => ["blueprint-courses", { disciplineId, yearLevel, termId }] as const,
+  disciplines:      ()                                                          => ["disciplines"] as const,
+  terms:          ()                                 => ["terms"] as const,
+  courses:        ()                                 => ["courses"] as const,
+  teachers:       ()                                 => ["teachers"] as const,
 };
  
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
@@ -405,6 +506,246 @@ export function useUpcomingAssignments(studentId: number | null) {
     enabled:   ENABLED(studentId),
   });
 }
+
+// ─── Reference data fetchers ─────────────────────────────────────────────────
+
+async function fetchDisciplines(): Promise<DisciplineOption[]> {
+  const { data } = await apiClient.get<DisciplineOption[]>("/academics/disciplines/");
+  return data;
+}
+
+async function fetchTerms(): Promise<TermOption[]> {
+  const { data } = await apiClient.get<TermOption[]>("/academics/terms/");
+  return data;
+}
+
+async function fetchCourses(): Promise<CourseOption[]> {
+  const { data } = await apiClient.get<CourseOption[]>("/academics/courses/");
+  return data;
+}
+
+async function fetchTeachers(): Promise<TeacherOption[]> {
+  const { data } = await apiClient.get<TeacherOption[]>("/users/teachers/");
+  return data;
+}
+
+// ─── Cohort fetchers ──────────────────────────────────────────────────────────
+
+async function fetchCohorts(status: string = "active", disciplineId?: number | null): Promise<Cohort[]> {
+  const params: Record<string, string | number> = { term_status: status };
+  if (disciplineId) {
+    params.discipline_id = disciplineId;
+  }
+  const { data } = await apiClient.get<Cohort[]>("/academics/groups/cohorts/", { params });
+  return data;
+}
+
+async function fetchBlueprintCourses(disciplineId: number, yearLevel: number, termId: number): Promise<CourseOption[]> {
+  const { data } = await apiClient.get<CourseOption[] | { results: CourseOption[] }>("/academics/courses/", {
+    params: {
+      discipline_id: disciplineId,
+      discipline: disciplineId,
+      year_level: yearLevel,
+      term_id: termId,
+      term: termId,
+    },
+  });
+  if (data && typeof data === "object" && "results" in data && Array.isArray((data as { results: CourseOption[] }).results)) {
+    return (data as { results: CourseOption[] }).results;
+  }
+  return Array.isArray(data) ? data : [];
+}
+
+async function createCohort(payload: CohortBulkCreatePayload): Promise<unknown> {
+  const { data } = await apiClient.post("/academics/groups/bulk-cohort/", payload);
+  return data;
+}
+
+async function deleteCohort(compositeId: string): Promise<void> {
+  try {
+    await apiClient.delete(`/academics/groups/cohorts/${compositeId}/`);
+  } catch (err: unknown) {
+    // 404 means the cohort is already gone — treat as success
+    if ((err as { response?: { status?: number } })?.response?.status === 404) return;
+    throw err;
+  }
+}
+
+// ─── Course-class & study-group granular fetchers ─────────────────────────────
+
+async function updateCourseClass({
+  id, payload,
+}: {
+  id: number;
+  payload: { coordinator_id?: number | null };
+}): Promise<unknown> {
+  const { data } = await apiClient.patch(`/academics/classes/${id}/`, payload);
+  return data;
+}
+
+async function deleteCourseClass(id: number): Promise<void> {
+  try {
+    await apiClient.delete(`/academics/classes/${id}/`);
+  } catch (err: unknown) {
+    // 404 means the class is already gone — treat as success
+    if ((err as { response?: { status?: number } })?.response?.status === 404) return;
+    throw err;
+  }
+}
+
+async function updateStudyGroup({
+  id, payload,
+}: {
+  id: number;
+  payload: { capacity?: number };
+}): Promise<unknown> {
+  const { data } = await apiClient.patch(`/academics/groups/${id}/`, payload);
+  return data;
+}
+
+async function deleteStudyGroup(id: number): Promise<void> {
+  try {
+    await apiClient.delete(`/academics/groups/${id}/`);
+  } catch (err: unknown) {
+    // 404 means the group is already gone — treat as success
+    if ((err as { response?: { status?: number } })?.response?.status === 404) return;
+    throw err;
+  }
+}
+
+// ─── Reference data hooks ─────────────────────────────────────────────────────
+
+export function useDisciplines() {
+  return useQuery({
+    queryKey:  queryKeys.disciplines(),
+    queryFn:   fetchDisciplines,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useTerms() {
+  return useQuery({
+    queryKey:  queryKeys.terms(),
+    queryFn:   fetchTerms,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCourses() {
+  return useQuery({
+    queryKey:  queryKeys.courses(),
+    queryFn:   fetchCourses,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useTeachers() {
+  return useQuery({
+    queryKey:  queryKeys.teachers(),
+    queryFn:   fetchTeachers,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useBlueprintCourses(disciplineId?: number, yearLevel?: number, termId?: number) {
+  return useQuery({
+    queryKey: queryKeys.blueprintCourses(disciplineId, yearLevel, termId),
+    queryFn: () => fetchBlueprintCourses(disciplineId!, yearLevel!, termId!),
+    enabled: !!disciplineId && !!yearLevel && !!termId,
+  });
+}
+
+// ─── Cohort hooks ─────────────────────────────────────────────────────────────
+
+export function useCohorts(status: "active" | "all" = "active", disciplineId?: number | null) {
+  return useQuery({
+    queryKey:  queryKeys.cohorts(status, disciplineId),
+    queryFn:   () => fetchCohorts(status, disciplineId),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useCreateCohort() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createCohort,
+    onSuccess: () => {
+      // Invalidate ALL cohort queries (prefix match) so the grid refreshes immediately
+      queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+    },
+  });
+}
+
+export function useDeleteCohort() {
+  const queryClient = useQueryClient();
+  // Use the bare ["cohorts"] prefix so it matches all active cohort queries
+  // regardless of their { status, disciplineId } params (null vs undefined mismatch).
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+  return useMutation({
+    mutationFn: deleteCohort,
+    onSuccess: invalidate,
+    // If a 404 somehow escapes the fetcher, still invalidate so the UI syncs
+    onError: (err: unknown) => {
+      if ((err as { response?: { status?: number } })?.response?.status === 404) {
+        invalidate();
+      }
+    },
+  });
+}
+
+// ─── Course-class & study-group granular mutation hooks ───────────────────────
+
+export function useUpdateCourseClass() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: updateCourseClass,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+    },
+  });
+}
+
+export function useDeleteCourseClass() {
+  const queryClient = useQueryClient();
+  // Use the bare ["cohorts"] prefix so it matches all active cohort queries
+  // regardless of their { status, disciplineId } params (null vs undefined mismatch).
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+  return useMutation({
+    mutationFn: deleteCourseClass,
+    onSuccess: invalidate,
+    onError: (err: unknown) => {
+      if ((err as { response?: { status?: number } })?.response?.status === 404) {
+        invalidate();
+      }
+    },
+  });
+}
+
+export function useUpdateStudyGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: updateStudyGroup,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+    },
+  });
+}
+
+export function useDeleteStudyGroup() {
+  const queryClient = useQueryClient();
+  // Use the bare ["cohorts"] prefix so it matches all active cohort queries
+  // regardless of their { status, disciplineId } params (null vs undefined mismatch).
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+  return useMutation({
+    mutationFn: deleteStudyGroup,
+    onSuccess: invalidate,
+    onError: (err: unknown) => {
+      if ((err as { response?: { status?: number } })?.response?.status === 404) {
+        invalidate();
+      }
+    },
+  });
+}
 </file>
 
 <file path="src/context/AuthContext.tsx">
@@ -507,12 +848,13 @@ export function useAuth(): AuthContextValue {
 
 <file path="src/pages/Dashboard.tsx">
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useStudentProfile, useEnrollments, useStudentSessions, useUpcomingExams, useUpcomingAssignments } from "../api";
+import { useStudentProfile, useEnrollments, useStudentSessions, useUpcomingExams, useUpcomingAssignments, useTeachers } from "../api";
 import type { Enrollment, EnrollmentRow, Session, NextClassInfo } from "../types";
 import Attendance from "./Attendance";
 import CourseworkDashboard from "./CourseworkDashboard";
 import { getCourseColorTheme } from "../courseColors";
 import ExamSchedulePage from "./ExamSchedulePage";
+import StudyGroupsPage from "./StudyGroupsPage";
 import GradesPage from "./GradesPage";
 import { useAuth } from '../context/AuthContext';
 
@@ -685,7 +1027,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
 
 // ─── Nav ──────────────────────────────────────────────────────────────────────
 
-const NAV_ITEMS = [
+const ALL_STUDENT_NAV_ITEMS = [
   { id: "dashboard",  label: "Dashboard",        icon: "⊞", group: "" },
   { id: "profile",    label: "My Profile",        icon: "◎", group: "" },
   { id: "schedule",   label: "Timetable",         icon: "▦", group: "ACADEMIC" },
@@ -693,10 +1035,36 @@ const NAV_ITEMS = [
   { id: "grades",     label: "Grades",            icon: "◈", group: "ACADEMIC" },
   { id: "exams",      label: "Exam Schedule",     icon: "◷", group: "ACADEMIC" },
   { id: "attendance", label: "Attendance",        icon: "◻", group: "ACADEMIC" },
-  { id: "fees",       label: "Fees & Payments",   icon: "◇", group: "ADMIN" },
-  { id: "documents",  label: "Documents",         icon: "◱", group: "ADMIN" },
-  { id: "warnings",   label: "Academic Standing", icon: "△", group: "ADMIN" },
+  { id: "fees",         label: "Fees & Payments",   icon: "◇", group: "ADMIN" },
+  { id: "documents",   label: "Documents",         icon: "◱", group: "ADMIN" },
+  { id: "warnings",    label: "Academic Standing", icon: "△", group: "ADMIN" },
 ];
+
+const PRESIDENT_EMAIL = "t.michelle.reyes0@alexu.edu.eg";
+
+import TeacherDashboard from "./TeacherDashboard";
+
+function getNavItems(user: { role: string; email: string } | null) {
+  if (!user) return ALL_STUDENT_NAV_ITEMS;
+  if (user.role === "STUDENT") return ALL_STUDENT_NAV_ITEMS;
+  if (user.role === "TEACHER") {
+    if (user.email === PRESIDENT_EMAIL) {
+      return [
+        { id: "dashboard", label: "Teacher Dashboard", icon: "⊞", group: "" },
+        { id: "study-groups", label: "Study Groups", icon: "👥", group: "ADMIN" }
+      ];
+    }
+    return [
+      { id: "dashboard", label: "Teacher Dashboard", icon: "⊞", group: "" },
+      { id: "study-groups", label: "Study Groups", icon: "👥", group: "ACADEMIC" }
+    ];
+  }
+  // ADMIN or other — show everything including study-groups
+  return [
+    ...ALL_STUDENT_NAV_ITEMS,
+    { id: "study-groups", label: "Study Groups", icon: "⊞", group: "ADMIN" },
+  ];
+}
 
 // ─── Exam Schedule page ───────────────────────────────────────────────────────
 
@@ -719,6 +1087,33 @@ export default function UniversityPortal() {
   const { data: sessions,    isLoading: sessionsLoading, isError: sessionsError } = useStudentSessions(STUDENT_ID);
   const { data: upcomingExams }       = useUpcomingExams(STUDENT_ID);
   const { data: upcomingAssignments } = useUpcomingAssignments(STUDENT_ID);
+  const { data: teachers = [] }       = useTeachers();
+
+  const isTeacher = user?.role === "TEACHER";
+  const currentTeacher = useMemo(() => {
+    if (!isTeacher) return null;
+    return teachers.find(t => t.user?.email === user?.email || t.user_name.includes(user?.email ?? ""));
+  }, [teachers, user, isTeacher]);
+
+  const userFirstName = isTeacher
+    ? (user?.first_name || currentTeacher?.user?.first_name || "Teacher")
+    : (profile?.user?.first_name ?? "");
+
+  const userFullName = isTeacher
+    ? (user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : currentTeacher?.user_name || `${user?.first_name || ""} ${user?.last_name || ""}`.trim() || user?.email.split("@")[0] || "Teacher")
+    : (profile ? (profile.user.full_name || `${profile.user.first_name} ${profile.user.last_name}`.trim() || "—") : "—");
+
+  const userIdDisplay = isTeacher
+    ? (currentTeacher?.id ? `${currentTeacher.id}` : user?.id ? `${user.id}` : "1")
+    : (profile?.id ? String(profile.id) : "—");
+
+  const userDepartmentOrDiscipline = isTeacher
+    ? (currentTeacher?.department_name || "Faculty Member")
+    : (profile?.discipline?.name ?? "—");
+
+  const userInitials = isTeacher
+    ? (user?.first_name?.[0] && user?.last_name?.[0] ? `${user.first_name[0]}${user.last_name[0]}` : (user?.first_name?.[0] || "T"))
+    : (profile ? (`${profile.user.first_name?.[0] ?? ""}${profile.user.last_name?.[0] ?? ""}` || "?") : "…");
 
   if (profileError)  console.error("[useStudentProfile] failed");
   if (enrollError)   console.error("[useEnrollments] failed");
@@ -791,11 +1186,11 @@ export default function UniversityPortal() {
     return () => document.removeEventListener("click", h);
   }, []);
 
-  const studentFirstName = profile?.user?.first_name ?? "";
-  const disciplineName   = profile?.discipline?.name ?? "—";
-  const studentIdDisplay = profile?.id ?? "—";
-  const initials         = profile ? (`${profile.user.first_name?.[0] ?? ""}${profile.user.last_name?.[0] ?? ""}` || "?") : "…";
-  const studentName      = profile ? (profile.user.full_name || `${profile.user.first_name} ${profile.user.last_name}`.trim() || "—") : "—";
+  const studentFirstName = userFirstName;
+  const disciplineName   = userDepartmentOrDiscipline;
+  const studentIdDisplay = userIdDisplay;
+  const initials         = userInitials;
+  const studentName      = userFullName;
   const topCourses       = profile?.top_courses ?? [];
 
   const nextClassDisplay = nextClass ? {
@@ -830,26 +1225,33 @@ export default function UniversityPortal() {
             {!collapsed && <div><div style={{ fontSize: 12, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.2px", whiteSpace: "nowrap" }}>Ibn al-Hitham</div><div style={{ fontSize: 9, color: "#a78bfa", fontWeight: 500, letterSpacing: ".5px", whiteSpace: "nowrap" }}>UNIVERSITY PORTAL</div></div>}
           </div>
           <nav style={{ flex: 1, padding: "10px 6px", overflowY: "auto" }}>
-            {["", "ACADEMIC", "ADMIN"].map(group => (
-              <div key={group}>
-                {group && !collapsed && <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "1px", color: "#c4b5fd", padding: "9px 10px 3px", whiteSpace: "nowrap" }}>{group}</div>}
-                {NAV_ITEMS.filter(n => n.group === group).map(item => {
-                  const isAct = activeNav === item.id;
-                  return (
-                    <div key={item.id} className={`nav-i${isAct ? " act" : ""}`} onClick={() => setActiveNav(item.id)}>
-                      <span style={{ fontSize: 14, flexShrink: 0, opacity: isAct ? 1 : 0.55 }}>{item.icon}</span>
-                      {!collapsed && <span style={{ flex: 1, whiteSpace: "nowrap" }}>{item.label}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
+            {(() => {
+              const navItems = getNavItems(user ? { role: user.role, email: user.email } : null);
+              return ["", "ACADEMIC", "ADMIN"].map(group => {
+                const groupItems = navItems.filter(n => n.group === group);
+                if (groupItems.length === 0) return null;
+                return (
+                  <div key={group}>
+                    {group && !collapsed && <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "1px", color: "#c4b5fd", padding: "9px 10px 3px", whiteSpace: "nowrap" }}>{group}</div>}
+                    {groupItems.map(item => {
+                      const isAct = activeNav === item.id;
+                      return (
+                        <div key={item.id} className={`nav-i${isAct ? " act" : ""}`} onClick={() => setActiveNav(item.id)}>
+                          <span style={{ fontSize: 14, flexShrink: 0, opacity: isAct ? 1 : 0.55 }}>{item.icon}</span>
+                          {!collapsed && <span style={{ flex: 1, whiteSpace: "nowrap" }}>{item.label}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              });
+            })()}
           </nav>
           {!collapsed && (
             <div style={{ margin: "0 6px 10px", padding: "11px", background: "#faf5ff", borderRadius: 11, border: "1px solid #ede9fe" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 28, height: 28, borderRadius: 7, background: "linear-gradient(135deg,#7c3aed,#a78bfa)", color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{initials}</div>
-                <div>{profileLoading ? <Skeleton w={90} h={11} /> : <div style={{ fontSize: 11.5, fontWeight: 600, color: "#1e1b4b", whiteSpace: "nowrap" }}>{studentName}</div>}<div style={{ fontSize: 9, color: "#a78bfa", marginTop: 2 }}>ID {studentIdDisplay}</div></div>
+                <div style={{ width: 28, height: 28, borderRadius: 7, background: "linear-gradient(135deg,#7c3aed,#a78bfa)", color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{userInitials}</div>
+                <div>{profileLoading && !isTeacher ? <Skeleton w={90} h={11} /> : <div style={{ fontSize: 11.5, fontWeight: 600, color: "#1e1b4b", whiteSpace: "nowrap" }}>{userFullName}</div>}<div style={{ fontSize: 9, color: "#a78bfa", marginTop: 2 }}>ID {userIdDisplay}</div></div>
               </div>
             </div>
           )}
@@ -876,8 +1278,8 @@ export default function UniversityPortal() {
             </button>
             <div style={{ position: "relative" }} data-profile-dd>
               <button onClick={() => setProfileOpen(v => !v)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 9px", border: "1.5px solid #ede9fe", borderRadius: 9, background: "transparent", cursor: "pointer", fontFamily: "inherit" }}>
-                <div style={{ width: 26, height: 26, borderRadius: 6, background: "linear-gradient(135deg,#7c3aed,#a78bfa)", color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{initials}</div>
-                <span style={{ fontSize: 12.5, color: "#1e1b4b", fontWeight: 500 }}>{studentFirstName || "…"}</span>
+                <div style={{ width: 26, height: 26, borderRadius: 6, background: "linear-gradient(135deg,#7c3aed,#a78bfa)", color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{userInitials}</div>
+                <span style={{ fontSize: 12.5, color: "#1e1b4b", fontWeight: 500 }}>{userFirstName || "…"}</span>
                 <span style={{ fontSize: 9, color: "#94a3b8" }}>▾</span>
               </button>
               {profileOpen && (
@@ -905,7 +1307,9 @@ export default function UniversityPortal() {
           {/* Content */}
           <main style={{ flex: 1, padding: "22px", overflowY: "auto" }}>
 
-            {activeNav === "dashboard" ? (
+            {activeNav === "dashboard" && user?.role === "TEACHER" ? (
+              <TeacherDashboard />
+            ) : activeNav === "dashboard" ? (
               <>
                 <div className="ani0" style={{ marginBottom: 22 }}>
                   {profileLoading
@@ -1258,7 +1662,10 @@ export default function UniversityPortal() {
 
             ) : activeNav === "attendance" ? (
               /* ── Attendance page ─────────────────────────────────────── */
-              <Attendance studentId={STUDENT_ID} />
+              <Attendance />
+
+            ) : activeNav === "study-groups" ? (
+              <StudyGroupsPage />
 
             ) : activeNav === "exams" ? (
               <ExamSchedulePage studentId={STUDENT_ID} />
@@ -1268,7 +1675,7 @@ export default function UniversityPortal() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
                 <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 20, border: "1px solid #ede9fe" }}>
                   <div style={{ fontSize: 36, marginBottom: 12 }}>🚧</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#1e1b4b" }}>{NAV_ITEMS.find(n => n.id === activeNav)?.label}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#1e1b4b" }}>{getNavItems(user ? { role: user.role, email: user.email } : null).find(n => n.id === activeNav)?.label}</div>
                   <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>Connect your DRF endpoint to populate this view.</div>
                 </div>
               </div>
@@ -1431,9 +1838,12 @@ export type TeacherRank = "TA" | "LECTURER" | "ASST_PROF" | "ASSOC_PROF" | "PROF
 
 export interface TeacherProfile extends Timestamps {
   id: number;
-  user: number; // FK → BaseUser.id
-  department: number | null;
+  user: BaseUser;
+  user_name?: string;
+  department: Department | null;
+  department_name?: string;
   rank: TeacherRank;
+  active_classes?: TeacherActiveCourseClass[];
 }
 
 export interface StudentProfile extends Timestamps {
@@ -1550,10 +1960,18 @@ export interface StudentSubmission extends Timestamps {
   max_points: string;
   score: string | null;  // null = not yet graded
   submitted_at: string;  // ISO-8601
-  is_late: boolean;      // @property
 }
 
 // ─── UI-layer derived types ───────────────────────────────────────────────────
+
+export interface TeacherActiveCourseClass {
+  id: number;
+  course_code: string;
+  course_title: string;
+  group_number: number;
+  discipline_code: string;
+  term_name: string;
+}
 
 /** Flat enrollment summary used in the Dashboard course table */
 export interface EnrollmentRow {

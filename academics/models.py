@@ -36,7 +36,7 @@ class Discipline(TimestampedModel):
     program_type = models.CharField(max_length=10, choices=ProgramType.choices)
     department   = models.OneToOneField(
         Department,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="discipline",
     )
 
@@ -81,7 +81,7 @@ class Course(TimestampedModel):
     )
     department  = models.ForeignKey(
         Department,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="courses",
     )
     lec_sessions = models.PositiveSmallIntegerField(default=1)
@@ -109,8 +109,7 @@ class Room(TimestampedModel):
     room_type  = models.CharField(max_length=10, choices=RoomType.choices)
     department = models.ForeignKey(
         Department,
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
+        on_delete=models.CASCADE,
         related_name="rooms",
     )
     is_active  = models.BooleanField(default=True)
@@ -126,12 +125,12 @@ class Room(TimestampedModel):
 class StudyGroup(TimestampedModel):
     discipline = models.ForeignKey(
         Discipline,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="groups",
     )
     term       = models.ForeignKey(
         Term,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="groups",
     )
     year_level = models.PositiveSmallIntegerField()   # 1 – 4
@@ -161,19 +160,18 @@ class StudyGroup(TimestampedModel):
 class CourseClass(TimestampedModel):
     course      = models.ForeignKey(
         Course,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="classes",
     )
     
     group       = models.ForeignKey(
         StudyGroup,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="course_classes",
     )
     coordinator = models.ForeignKey(
         "users.TeacherProfile",
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
+        on_delete=models.CASCADE,
         related_name="coordinated_classes",
     )
 
