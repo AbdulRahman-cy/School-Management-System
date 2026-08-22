@@ -1,4 +1,3 @@
-import React from "react";
 import { useAuth } from "../context/AuthContext";
 import { useTeachers } from "../api";
 import { getCourseColorTheme } from "../courseColors";

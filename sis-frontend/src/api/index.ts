@@ -7,11 +7,18 @@ import type {
 
 // ─── Reference data types (disciplines / terms / courses / teachers) ──────────
 
+export interface DepartmentOption {
+  id: number;
+  code: string;
+  name: string;
+}
+
 export interface DisciplineOption {
   id: number;
   code: string;
   name: string;
   program_type: "GSP" | "SSP";
+  department: DepartmentOption;
 }
 
 export interface TermOption {
@@ -34,6 +41,7 @@ export interface TeacherOption {
   id: number;
   user_name: string; // "Full Name <email>" from StringRelatedField
   user?: { id: number; email: string; first_name: string; last_name: string; role: string };
+  department: DepartmentOption | null;
   department_name?: string;
   active_classes?: TeacherActiveCourseClass[];
 }

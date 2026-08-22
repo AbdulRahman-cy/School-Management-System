@@ -571,6 +571,15 @@ async function deleteCohort(compositeId: string): Promise<void> {
   }
 }
 
+async function createCourseClass(payload: {
+  course_id: number;
+  group_id: number;
+  coordinator_id?: number | null;
+}): Promise<unknown> {
+  const { data } = await apiClient.post("/academics/classes/", payload);
+  return data;
+}
+
 // ─── Course-class & study-group granular fetchers ─────────────────────────────
 
 async function updateCourseClass({
@@ -611,6 +620,19 @@ async function deleteStudyGroup(id: number): Promise<void> {
     if ((err as { response?: { status?: number } })?.response?.status === 404) return;
     throw err;
   }
+}
+
+export interface AddStudyGroupPayload {
+  discipline_id: number;
+  term_id: number;
+  year_level: number;
+  number: number;
+  capacity?: number;
+}
+
+async function addStudyGroup(payload: AddStudyGroupPayload): Promise<unknown> {
+  const { data } = await apiClient.post("/academics/groups/add-group/", payload);
+  return data;
 }
 
 // ─── Reference data hooks ─────────────────────────────────────────────────────
@@ -671,7 +693,7 @@ export function useCreateCohort() {
     mutationFn: createCohort,
     onSuccess: () => {
       // Invalidate ALL cohort queries (prefix match) so the grid refreshes immediately
-      queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+      queryClient.invalidateQueries({ queryKey: ["cohorts"] });
     },
   });
 }
@@ -680,7 +702,7 @@ export function useDeleteCohort() {
   const queryClient = useQueryClient();
   // Use the bare ["cohorts"] prefix so it matches all active cohort queries
   // regardless of their { status, disciplineId } params (null vs undefined mismatch).
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"] });
   return useMutation({
     mutationFn: deleteCohort,
     onSuccess: invalidate,
@@ -693,6 +715,17 @@ export function useDeleteCohort() {
   });
 }
 
+export function useCreateCourseClass() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createCourseClass,
+    onSuccess: () => {
+      // Aggressively flush all cohort-related caches using prefix matching
+      queryClient.invalidateQueries({ queryKey: ["cohorts"] });
+    },
+  });
+}
+
 // ─── Course-class & study-group granular mutation hooks ───────────────────────
 
 export function useUpdateCourseClass() {
@@ -700,7 +733,7 @@ export function useUpdateCourseClass() {
   return useMutation({
     mutationFn: updateCourseClass,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+      queryClient.invalidateQueries({ queryKey: ["cohorts"] });
     },
   });
 }
@@ -709,7 +742,7 @@ export function useDeleteCourseClass() {
   const queryClient = useQueryClient();
   // Use the bare ["cohorts"] prefix so it matches all active cohort queries
   // regardless of their { status, disciplineId } params (null vs undefined mismatch).
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"] });
   return useMutation({
     mutationFn: deleteCourseClass,
     onSuccess: invalidate,
@@ -726,7 +759,7 @@ export function useUpdateStudyGroup() {
   return useMutation({
     mutationFn: updateStudyGroup,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+      queryClient.invalidateQueries({ queryKey: ["cohorts"] });
     },
   });
 }
@@ -735,7 +768,7 @@ export function useDeleteStudyGroup() {
   const queryClient = useQueryClient();
   // Use the bare ["cohorts"] prefix so it matches all active cohort queries
   // regardless of their { status, disciplineId } params (null vs undefined mismatch).
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"], refetchType: "active" });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cohorts"] });
   return useMutation({
     mutationFn: deleteStudyGroup,
     onSuccess: invalidate,
@@ -743,6 +776,16 @@ export function useDeleteStudyGroup() {
       if ((err as { response?: { status?: number } })?.response?.status === 404) {
         invalidate();
       }
+    },
+  });
+}
+
+export function useAddStudyGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: addStudyGroup,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cohorts"] });
     },
   });
 }

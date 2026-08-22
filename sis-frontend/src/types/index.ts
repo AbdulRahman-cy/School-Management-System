@@ -269,6 +269,7 @@ export interface StudentSubmission extends Timestamps {
   max_points: string;
   score: string | null;  // null = not yet graded
   submitted_at: string;  // ISO-8601
+  is_late: boolean;
 }
 
 // ─── UI-layer derived types ───────────────────────────────────────────────────

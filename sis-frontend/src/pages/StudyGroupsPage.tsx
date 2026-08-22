@@ -1011,8 +1011,10 @@ interface NewCohortForm {
 }
 
 function NewCohortModal({
+  initialDisciplineId,
   onClose, submitCohort, isPending,
 }: {
+  initialDisciplineId?: number | null;
   onClose: () => void;
   submitCohort: (payload: CohortBulkCreatePayload, opts: { onSuccess: () => void; onError: (e: unknown) => void }) => void;
   isPending: boolean;
@@ -1026,7 +1028,7 @@ function NewCohortModal({
 
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<NewCohortForm>({
-    disciplineId: 0, termId: 0, year_level: 1,
+    disciplineId: initialDisciplineId ?? 0, termId: 0, year_level: 1,
     numGroups: 3, groupCapacity: 50, selectedCourseCodes: new Set(), coordinatorAssignments: {},
   });
 
@@ -1035,12 +1037,44 @@ function NewCohortModal({
     form.disciplineId, form.year_level, form.termId
   );
 
-  // Once disciplines load, seed the default disciplineId if not already set
+  // Once disciplines load, seed the default/initial disciplineId
   useEffect(() => {
-    if (disciplines.length > 0 && form.disciplineId === 0) {
-      setForm(f => ({ ...f, disciplineId: disciplines[0].id }));
+    if (disciplines.length > 0) {
+      if (initialDisciplineId && disciplines.some((d: DisciplineOption) => d.id === initialDisciplineId)) {
+        setForm(f => ({ ...f, disciplineId: initialDisciplineId }));
+      } else if (form.disciplineId === 0) {
+        setForm(f => ({ ...f, disciplineId: disciplines[0].id }));
+      }
     }
-  }, [disciplines]);
+  }, [disciplines, initialDisciplineId]);
+
+  // Filter teachers by selected discipline's department
+  const selectedDisciplineObj = disciplines.find((d: DisciplineOption) => d.id === form.disciplineId);
+  const departmentTeachers = wTeachers.filter((t: TeacherOption) => {
+    if (!selectedDisciplineObj) return true;
+    const discDeptId = selectedDisciplineObj.department?.id;
+    const discDeptName = selectedDisciplineObj.department?.name?.toLowerCase();
+    const discName = selectedDisciplineObj.name.toLowerCase();
+    const discCode = selectedDisciplineObj.code.toLowerCase();
+
+    if (discDeptId && t.department?.id) {
+      return t.department.id === discDeptId;
+    }
+    if (t.department?.name) {
+      const dName = t.department.name.toLowerCase();
+      if (discDeptName && dName === discDeptName) return true;
+      if (dName === discName || dName.includes(discCode)) return true;
+    }
+    if (t.department_name) {
+      const dName = t.department_name.toLowerCase();
+      if (discDeptName && dName === discDeptName) return true;
+      if (dName === discName || dName.includes(discCode)) return true;
+    }
+    return false;
+  });
+
+  // Fallback to all teachers if no teacher matches the discipline's department
+  const displayTeachers = departmentTeachers.length > 0 ? departmentTeachers : wTeachers;
 
   // Bind active term ID silently
   useEffect(() => {
@@ -1235,7 +1269,7 @@ function NewCohortModal({
                           const k = `${course.code}_${letter}`;
                           const val = form.coordinatorAssignments[k] ?? 0;
                           return (
-                            <div key={letter} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 12px", borderRadius: 9, background: "#faf5ff", border: "1px solid #ede9fe" }}>
+                            <div key={letter} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 12px", borderRadius: 9, background: "#faf5ff", border: "1.5px solid #ede9fe" }}>
                               <div style={{ width: 30, height: 30, borderRadius: 7, flexShrink: 0, background: `linear-gradient(135deg, ${ct.dot}, ${ct.color})`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", boxShadow: `0 2px 8px ${ct.color}30` }}>{letter}</div>
                               <span style={{ fontSize: 11.5, fontWeight: 600, color: "#374151", minWidth: 50 }}>Grp {letter}</span>
                               <select value={val} onChange={e => setCoordinator(course.code, letter, Number(e.target.value))}
@@ -1243,7 +1277,7 @@ function NewCohortModal({
                                 <option value={0}>— Unassigned —</option>
                                 {isLoadingTeachers
                                   ? <option disabled>Loading teachers…</option>
-                                  : wTeachers.map((t: TeacherOption) => <option key={t.id} value={t.id}>{t.user_name}</option>)
+                                  : displayTeachers.map((t: TeacherOption) => <option key={t.id} value={t.id}>{t.user_name}</option>)
                                 }
                               </select>
                             </div>

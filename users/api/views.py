@@ -79,21 +79,6 @@ def clear_auth_cookies(response):
     return response
 
 
-class BaseUserViewSet(viewsets.ModelViewSet):
-    queryset = BaseUser.objects.all()
-    serializer_class = BaseUserSerializer
-
-
-class TeacherProfileViewSet(viewsets.ModelViewSet):
-    queryset = TeacherProfile.objects.all()
-    serializer_class = TeacherProfileSerializer
-
-
-class StudentProfileViewSet(viewsets.ModelViewSet):
-    queryset = StudentProfile.objects.all()
-    serializer_class = StudentProfileSerializer
-
-
 # ─────────────────────────────────────────────────────────────────────
 # 1. Registration
 # ─────────────────────────────────────────────────────────────────────
@@ -218,3 +203,18 @@ class MeView(APIView):
             data['profile_id'] = None
 
         return Response(data)
+
+
+class BaseUserViewSet(viewsets.ModelViewSet):
+    queryset = BaseUser.objects.all()
+    serializer_class = BaseUserSerializer
+
+
+class TeacherProfileViewSet(viewsets.ModelViewSet):
+    queryset = TeacherProfile.objects.all()
+    serializer_class = TeacherProfileSerializer
+
+
+class StudentProfileViewSet(viewsets.ModelViewSet):
+    queryset = StudentProfile.objects.all()
+    serializer_class = StudentProfileSerializer

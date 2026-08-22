@@ -19,12 +19,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AlterField(
             model_name='courseclass',
-            name='coordinator',
-            field=models.ForeignKey(default=None, on_delete=django.db.models.deletion.CASCADE, related_name='coordinated_classes', to='users.teacherprofile'),
-            preserve_default=False,
-        ),
-        migrations.AlterField(
-            model_name='courseclass',
             name='course',
             field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='classes', to='academics.course'),
         ),
@@ -37,12 +31,6 @@ class Migration(migrations.Migration):
             model_name='discipline',
             name='department',
             field=models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='discipline', to='academics.department'),
-        ),
-        migrations.AlterField(
-            model_name='room',
-            name='department',
-            field=models.ForeignKey(default=None, on_delete=django.db.models.deletion.CASCADE, related_name='rooms', to='academics.department'),
-            preserve_default=False,
         ),
         migrations.AlterField(
             model_name='studygroup',

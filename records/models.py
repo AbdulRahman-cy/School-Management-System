@@ -90,6 +90,7 @@ class Enrollment(TimestampedModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["student", "course_class"],
+                include=["id"], # Appends the PK directly to the B-tree leaf nodes
                 name="unique_student_enrollment",
             )
         ]
@@ -315,7 +316,17 @@ class ExamResult(TimestampedModel):
         EXCUSED  = "EXCUSED",  "Excused"
         CHEATING = "CHEATING", "Disqualified"
 
-    exam    = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name="results")
+    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name="results")
+    
+    # 1. NEW FIELD: Denormalized CourseClass (temporary null=True for migration)
+    course_class = models.ForeignKey(
+        "academics.CourseClass",
+        on_delete=models.CASCADE,
+        related_name="exam_results",
+        null=True,
+        blank=True,
+    )
+    
     student = models.ForeignKey(
         "users.StudentProfile",
         on_delete=models.CASCADE,
@@ -326,10 +337,7 @@ class ExamResult(TimestampedModel):
         choices=Status.choices,
         default=Status.PRESENT,
     )
-    # null  → row created after exam was held, grading not yet complete
-    # 0.00  → student sat the exam and scored zero (or disqualified)
-    score  = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-
+    score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -340,30 +348,26 @@ class ExamResult(TimestampedModel):
         ]
 
     def clean(self):
-        # 1. Enrollment check
-        if not Enrollment.objects.filter(
-            student=self.student,
-            course_class=self.exam.course_class,
-        ).exists():
-            raise ValidationError(
-                f"Student {self.student} is not enrolled in {self.exam.course_class}."
-            )
+        # 2. Auto-sync the denormalized field if it wasn't provided
+        if self.exam_id and not self.course_class_id:
+            self.course_class_id = self.exam.course_class_id
 
-        # 2. Score bounds
+        # 3. OPTIMIZED: Use raw _id fields to prevent hidden JOINs
+        if not Enrollment.objects.filter(
+            student_id=self.student_id,
+            course_class_id=self.course_class_id,
+        ).exists():
+            raise ValidationError("Student is not enrolled in this class.")
+
         if self.score is not None:
             if self.score < 0:
                 raise ValidationError("Score cannot be negative.")
             if self.score > self.exam.max_score:
-                raise ValidationError(
-                    f"Score {self.score} exceeds the maximum of {self.exam.max_score}."
-                )
+                raise ValidationError(f"Score {self.score} exceeds the maximum of {self.exam.max_score}.")
 
-        # 3. Absent or disqualified students cannot have a positive score
         if self.status in (self.Status.ABSENT, self.Status.CHEATING):
             if self.score is not None and self.score > 0:
-                raise ValidationError(
-                    "An absent or disqualified student cannot have a score above 0."
-                )
+                raise ValidationError("An absent or disqualified student cannot have a score above 0.")
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -476,18 +480,18 @@ def sync_exam_result_to_grade_entry(sender, instance, **kwargs):
     if instance.score is None:
         return
 
-    from records.models import Enrollment, GradeEntry # Local import to avoid circular dependencies if any
-    enrollment = Enrollment.objects.filter(
-        student=instance.student,
-        course_class=instance.exam.course_class,
-    ).first()
+    # Perfect, zero-join, Index-Only Scan
+    enrollment_id = Enrollment.objects.filter(
+        student_id=instance.student_id,
+        course_class_id=instance.course_class_id, # <--- Sitting right on the instance!
+    ).values_list('id', flat=True).first()
 
-    if not enrollment:
+    if not enrollment_id:
         return
 
     GradeEntry.objects.update_or_create(
-        enrollment=enrollment,
-        component=instance.exam.get_exam_type_display(),
+        enrollment_id=enrollment_id,  
+        component=instance.exam.get_exam_type_display(), # (This will still trigger an exam fetch, see below)
         defaults={"score": instance.score},
     )
 

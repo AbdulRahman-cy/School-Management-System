@@ -9,7 +9,7 @@ from records.models import Enrollment
 from scheduling.models import Session
 
 
-STUDENT_ID   = 4
+STUDENT_ID   = 20
 CURRENT_WEEK = 5    
 TOTAL_WEEKS  = 15   
 

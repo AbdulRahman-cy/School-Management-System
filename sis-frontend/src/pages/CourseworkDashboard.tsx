@@ -469,7 +469,6 @@ export default function CourseworkDashboard() {
     return { total: submissions.length, graded: graded.length, pending: pending.length, late: late.length };
   }, [submissions]);
 
-  const isLoading = activeTab === "exams" ? examsLoading : subsLoading;
   const isError   = activeTab === "exams" ? examsError  : subsError;
   const errorMsg  = activeTab === "exams"
     ? (examsErrorObj as Error)?.message

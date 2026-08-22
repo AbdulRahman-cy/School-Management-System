@@ -55,7 +55,7 @@ class Term(TimestampedModel):
         SUMMER = "SUMMER", "Summer"
 
     name       = models.CharField(max_length=100, unique=True)
-    season     = models.CharField(max_length=10, choices=Season.choices, null=True) # Temporarily null
+    season     = models.CharField(max_length=10, choices=Season.choices) 
     start_date = models.DateField()
     end_date   = models.DateField()
     is_active  = models.BooleanField(default=False)
@@ -109,14 +109,15 @@ class Room(TimestampedModel):
     room_type  = models.CharField(max_length=10, choices=RoomType.choices)
     department = models.ForeignKey(
         Department,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="rooms",
     )
     is_active  = models.BooleanField(default=True)
 
     def __str__(self):
         return f"{self.code} ({self.room_type}, cap {self.capacity})"
-
 
 # ─────────────────────────────────────────────────────────────
 # StudyGroup
@@ -173,6 +174,8 @@ class CourseClass(TimestampedModel):
         "users.TeacherProfile",
         on_delete=models.CASCADE,
         related_name="coordinated_classes",
+        null=True,   # Tells the database to allow empty values
+        blank=True,  # Tells Django forms/serializers to allow empty values
     )
 
     class Meta:

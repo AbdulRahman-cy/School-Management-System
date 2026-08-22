@@ -3,13 +3,6 @@ from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin, UserManager
 from django.utils import timezone
 
-# 1. The Custom Manager (The Filter)
-class ActiveManager(models.Manager):
-    def get_queryset(self):
-        # Automatically hides any row where is_active is False
-        return super().get_queryset().filter(is_active=True)
-
-# 2. The Abstract Base Model (The Blueprint)
 class SoftDeleteModel(models.Model):
     is_active = models.BooleanField(default=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -38,6 +31,10 @@ class ActiveUserManager(UserManager):
     def get_queryset(self):
         return super().get_queryset().filter(is_active=True)
 
+class ActiveManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(is_active=True)
+
 
 
 class BaseUserManager_(BaseUserManager):
@@ -49,8 +46,6 @@ class BaseUserManager_(BaseUserManager):
         user.set_password(password)
         user.save(using=self._db)
         return user
-
-
 
     def create_superuser(self, email, password=None, **extra_fields):
         extra_fields.setdefault("role", BaseUser.Role.ADMIN)

@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useStudentProfile, useEnrollments, useStudentSessions, useUpcomingExams, useUpcomingAssignments, useTeachers } from "../api";
-import type { Enrollment, EnrollmentRow, Session, NextClassInfo } from "../types";
+import type { EnrollmentRow, Session, NextClassInfo } from "../types";
 import Attendance from "./Attendance";
-import CourseworkDashboard from "./CourseworkDashboard";
+
 import { getCourseColorTheme } from "../courseColors";
 import ExamSchedulePage from "./ExamSchedulePage";
 import StudyGroupsPage from "./StudyGroupsPage";
@@ -54,17 +54,6 @@ function resolveNextClass(sessions: Session[]): NextClassInfo | null {
   return { sessionId: next.id, sessionType: next.session_type, courseCode: next.course_code, courseName: next.course_name, room: next.room, timeslot: next.timeslot };
 }
 
-function gradeLabel(gp: number): string {
-  if (gp >= 4.0) return "A";
-  if (gp >= 3.7) return "A-";
-  if (gp >= 3.3) return "B+";
-  if (gp >= 3.0) return "B";
-  if (gp >= 2.7) return "C+";
-  if (gp >= 2.4) return "C";
-  if (gp >= 2.0) return "D+";
-  if (gp >= 1.0) return "D";
-  return "F";
-}
 
 // ─── Course code pill ─────────────────────────────────────────────────────────
 
@@ -105,11 +94,6 @@ function StatusCardSkeleton() {
   );
 }
 
-function TableRowSkeleton() {
-  return (
-    <tr>{[60,160,30,60,50].map((w, i) => <td key={i} style={{ padding: "12px 14px" }}><Skeleton w={w} h={14} /></td>)}</tr>
-  );
-}
 
 // ─── Radial progress ──────────────────────────────────────────────────────────
 
@@ -125,17 +109,6 @@ function RadialProgress({ value, color, size = 50 }: { value: number; color: str
   );
 }
 
-function EmptyDashboard() {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
-      <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 20, border: "1px solid #ede9fe", boxShadow: "0 24px 64px rgba(124,58,237,0.08)" }}>
-        <div style={{ fontSize: 36, marginBottom: 12 }}>🚧</div>
-        <div style={{ fontSize: 16, fontWeight: 700, color: "#1e1b4b" }}>No enrollments yet</div>
-        <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>This student hasn't been enrolled in any courses this term.</div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Command palette ──────────────────────────────────────────────────────────
 
@@ -230,7 +203,6 @@ export default function UniversityPortal() {
   const [collapsed,    setCollapsed]    = useState(false);
   const [cmdOpen,      setCmdOpen]      = useState(false);
   const [profileOpen,  setProfileOpen]  = useState(false);
-  const [expandedRow,  setExpandedRow]  = useState<number | null>(null);
   const [coursesView,  setCoursesView]  = useState<"active" | "all">("active");
 
   const { data: profile,     isLoading: profileLoading,  isError: profileError  } = useStudentProfile(STUDENT_ID);

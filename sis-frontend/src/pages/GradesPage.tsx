@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { usePastEnrollments } from "../api";
 import { getCourseColorTheme } from "../courseColors";
-import type { CohortStats, GradeEntry } from "../types";
+import type { CohortStats } from "../types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

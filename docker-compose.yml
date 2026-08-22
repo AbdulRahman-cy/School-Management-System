@@ -2,23 +2,52 @@ services:
   db:
     image: postgres:15-alpine
     environment:
-      POSTGRES_DB: university_db
-      POSTGRES_USER: postgres_user
-      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # Not published to the host — only `backend` needs to reach Postgres,
+    # over the internal Docker network via the service name `db`. Publishing
+    # 5432 on a public EC2 box would let anyone on the internet attempt a
+    # direct connection to your database.
+    expose:
+      - "5432"
 
   web:
     build: .
-    command: python manage.py runserver 0.0.0.0:8000
+    # gunicorn runs inside the same container as Django — same image, same
+    # Dockerfile, just a different process than the dev server. --workers 3
+    # is a modest starting point ((2 x cores) + 1 is the common formula);
+    # tune once you know the EC2 instance's actual core count.
+    # --access-logfile - / --error-logfile - send gunicorn's own logs to
+    # stdout, alongside Django's LOGGING output — both show up together
+    # in `docker compose logs web`.
+    command: gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 3 --access-logfile - --error-logfile -
     volumes:
       - .:/app
-    ports:
-      - "8000:8000"
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    # Not published to the host — nginx is the only public entrypoint.
+    # This is what makes settings.py's SECURE_PROXY_SSL_HEADER trust
+    # assumption actually safe: if `web` were reachable directly, someone
+    # could forge the X-Forwarded-Proto header themselves.
+    expose:
+      - "8000"
     depends_on:
       - db
+
+  nginx:
+    # Build context is a guess based on the frontend living in
+    # sis-frontend/ — confirm/correct once we look at the actual project.
+    build: ./sis-frontend
+    ports:
+      - "80:80"
+    volumes:
+      - static_volume:/app/staticfiles:ro
+      - media_volume:/app/media:ro
+    depends_on:
+      - web
 
   migrator:
     image: ghcr.io/dimitri/pgloader:latest
@@ -31,3 +60,5 @@ services:
 
 volumes:
   postgres_data:
+  static_volume:
+  media_volume:
