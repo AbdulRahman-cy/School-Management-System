@@ -7,39 +7,23 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # Not published to the host — only `backend` needs to reach Postgres,
-    # over the internal Docker network via the service name `db`. Publishing
-    # 5432 on a public EC2 box would let anyone on the internet attempt a
-    # direct connection to your database.
     expose:
       - "5432"
 
   web:
     build: .
-    # gunicorn runs inside the same container as Django — same image, same
-    # Dockerfile, just a different process than the dev server. --workers 3
-    # is a modest starting point ((2 x cores) + 1 is the common formula);
-    # tune once you know the EC2 instance's actual core count.
-    # --access-logfile - / --error-logfile - send gunicorn's own logs to
-    # stdout, alongside Django's LOGGING output — both show up together
-    # in `docker compose logs web`.
-    command: gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 3 --access-logfile - --error-logfile -
+    command: sh -c "python manage.py collectstatic --noinput && gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 3 --access-logfile - --error-logfile -"
+    env_file:
+      - .env
     volumes:
-      - .:/app
       - static_volume:/app/staticfiles
       - media_volume:/app/media
-    # Not published to the host — nginx is the only public entrypoint.
-    # This is what makes settings.py's SECURE_PROXY_SSL_HEADER trust
-    # assumption actually safe: if `web` were reachable directly, someone
-    # could forge the X-Forwarded-Proto header themselves.
     expose:
       - "8000"
     depends_on:
       - db
 
   nginx:
-    # Build context is a guess based on the frontend living in
-    # sis-frontend/ — confirm/correct once we look at the actual project.
     build: ./sis-frontend
     ports:
       - "80:80"
@@ -48,15 +32,6 @@ services:
       - media_volume:/app/media:ro
     depends_on:
       - web
-
-  migrator:
-    image: ghcr.io/dimitri/pgloader:latest
-    profiles: ["tools"]
-    depends_on:
-      - db
-    volumes:
-      - .:/data
-    command: ["pgloader", "/data/migrate.load"]
 
 volumes:
   postgres_data:

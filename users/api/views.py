@@ -41,7 +41,7 @@ REFRESH_COOKIE_MAX_AGE = int(
 def _cookie_kwargs(max_age: int, path: str = '/') -> dict:
     return {
         'httponly': True,
-        'secure':   not settings.DEBUG,   # HTTPS-only in production
+        'secure':   False,   
         'samesite': 'Strict',             # blocks CSRF for same-site SPA
         'max_age':  max_age,
         'path':     path,
