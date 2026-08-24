@@ -76,3 +76,5 @@ pnpm-debug.log*
 
 # Vite / React specific
 *.local
+
+repomix-output.xml

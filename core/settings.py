@@ -27,8 +27,7 @@ ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
 
 # NEW: required by Django 4+ for any unsafe (POST/PUT/DELETE/PATCH) request
 # that isn't strictly same-origin. Must include the scheme (https://).
-CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[])
-
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS")
 INSTALLED_APPS = [
     'corsheaders',
     'django.contrib.admin',

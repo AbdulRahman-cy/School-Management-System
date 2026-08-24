@@ -7,11 +7,12 @@ import {
   useDisciplines, useTerms, useTeachers, useBlueprintCourses,
   useDeleteCohort, useUpdateCourseClass, useDeleteCourseClass,
   useUpdateStudyGroup, useDeleteStudyGroup, useCreateCourseClass,
-  useAddStudyGroup,
+  useAddStudyGroup, useScheduleCohort,
 } from "../api";
 import type {
   Cohort as APICohort, CohortBulkCreatePayload,
   DisciplineOption, TermOption, CourseOption, TeacherOption,
+  ScheduleCohortResult,
 } from "../api";
 
 
@@ -22,6 +23,7 @@ interface UIDiscipline {
   name: string;
   code: string;
   program_type: ProgramType;
+  department: { id: number; name: string } | null;
 }
 
 interface UITerm {
@@ -64,6 +66,7 @@ export interface UICohort {
   coordinators: CoordinatorMap;
   /** Maps "courseCode_groupLetter" → CourseClass DB PK, used for PATCH mutations */
   courseClassIds: CourseClassIdMap;
+  is_scheduled: boolean;
 }
 
 
@@ -138,6 +141,7 @@ function adaptCohort(c: APICohort): UICohort {
       name: c.discipline.name,
       code: c.discipline.code,
       program_type: c.discipline.program_type,
+      department: c.discipline.department ?? null,
     },
     term: { id: c.term.id, name: c.term.name, is_active: c.term.is_active },
     year_level: c.year_level,
@@ -145,6 +149,7 @@ function adaptCohort(c: APICohort): UICohort {
     courses: Array.from(courseMap.values()),
     coordinators,
     courseClassIds,
+    is_scheduled: c.is_scheduled,
   };
 }
 
@@ -192,7 +197,7 @@ function Toast({ message, type, onDone }: { message: string; type: "success" | "
 
 // ─── ConfirmDialog ────────────────────────────────────────────────────────────
 
-function ConfirmDialog({ message, onConfirm, onCancel }: { message: string; onConfirm: () => void; onCancel: () => void }) {
+function ConfirmDialog({ message, onConfirm, onCancel, confirmLabel = "Delete" }: { message: string; onConfirm: () => void; onCancel: () => void; confirmLabel?: string }) {
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(15,10,30,0.45)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div style={{ background: "#fff", borderRadius: 16, padding: "24px 28px", maxWidth: 380, width: "100%", boxShadow: "0 24px 64px rgba(100,50,255,0.16)", border: "1px solid #fee2e2", animation: "fadeUp .2s ease both" }}>
@@ -201,7 +206,7 @@ function ConfirmDialog({ message, onConfirm, onCancel }: { message: string; onCo
         <div style={{ fontSize: 11.5, color: "#94a3b8", marginBottom: 20 }}>This action cannot be undone.</div>
         <div style={{ display: "flex", gap: 10 }}>
           <button onClick={onCancel} style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: "1.5px solid #ede9fe", background: "#faf5ff", color: "#64748b", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "'Sora',sans-serif" }}>Cancel</button>
-          <button onClick={onConfirm} style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: "none", background: "linear-gradient(135deg,#ef4444,#dc2626)", color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Sora',sans-serif", boxShadow: "0 4px 14px rgba(239,68,68,0.28)" }}>Delete</button>
+          <button onClick={onConfirm} style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: "none", background: "linear-gradient(135deg,#ef4444,#dc2626)", color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Sora',sans-serif", boxShadow: "0 4px 14px rgba(239,68,68,0.28)" }}>{confirmLabel}</button>
         </div>
       </div>
     </div>
@@ -459,18 +464,69 @@ export function getDisciplineColors(code: string) {
 
 // ─── CohortCard ───────────────────────────────────────────────────────────────
 
-function CohortCard({ cohort, onOpen }: { cohort: UICohort; onOpen: () => void }) {
+function CohortCard({ cohort, onOpen, onToast }: {
+  cohort: UICohort;
+  onOpen: () => void;
+  onToast: (msg: string, type: "success" | "error" | "warn") => void;
+}) {
   const [hovered, setHovered] = useState(false);
+  const [schedulerHovered, setSchedulerHovered] = useState(false);
+  const [rescheduleConfirm, setRescheduleConfirm] = useState<string | null>(null);
   const colors = getDisciplineColors(cohort.discipline.code);
   const totalCap = cohort.groups.reduce((s, g) => s + g.capacity, 0);
+
+  const { mutate: runSchedule, isPending: isScheduling } = useScheduleCohort();
+  const isSchedulerDisabled = isScheduling || !cohort.term.is_active;
+
+  function doSchedule(force?: boolean) {
+    runSchedule(
+      { discipline_id: cohort.discipline.id, term_id: cohort.term.id, year_level: cohort.year_level, ...(force ? { force: true } : {}) },
+      {
+        onSuccess: (result: ScheduleCohortResult) => {
+          onToast(
+            `Scheduled ${result.sessions_created} session${result.sessions_created !== 1 ? "s" : ""} (${result.status}) in ${result.solve_time_seconds.toFixed(1)}s`,
+            "success",
+          );
+        },
+        onError: (err: unknown) => {
+          const status = (err as { response?: { status?: number } })?.response?.status;
+          const detail =
+            (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+            ?? "Scheduling failed — please try again.";
+          if (detail.includes("Pass force=true to proceed")) {
+            // Cohort was already scheduled — show in-app confirm dialog instead of window.confirm
+            setRescheduleConfirm(detail);
+            return; // expected branch — no toast, no console.error
+          }
+          if (status === 409) {
+            // Expected outcome — room/timeslot conflict. Show to user, don't log.
+            onToast(detail, "error");
+          } else {
+            // 400 or unexpected — show to user AND surface to devs.
+            console.error("[useScheduleCohort] error:", err);
+            onToast(detail, "error");
+          }
+        },
+      },
+    );
+  }
+
+  function handleSchedule(e: React.MouseEvent) {
+    e.stopPropagation();
+    doSchedule();
+  }
+
   return (
     <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onOpen}
       style={{ display: "flex", flexDirection: "column", background: `linear-gradient(180deg, ${colors.bg} 0%, #ffffff 65%)`, borderRadius: 24, border: `1.5px solid ${hovered ? colors.text + "66" : colors.border}`, overflow: "hidden", boxShadow: hovered ? `0 24px 56px ${colors.text}25` : `0 8px 24px ${colors.text}10`, transition: "box-shadow .22s ease, border-color .22s ease, transform .22s ease", transform: hovered ? "translateY(-5px)" : "translateY(0)", cursor: "pointer" }}>
-      <div style={{ minHeight: 120, background: colors.gradient, display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "15px 16px", flexShrink: 0, position: "relative" }}>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      <div style={{ minHeight: 120, background: colors.gradient, display: "flex", alignItems: "flex-start", gap: 8, padding: "15px 16px", flexShrink: 0, position: "relative" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", flex: 1 }}>
           <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".7px", padding: "4px 11px", borderRadius: 99, background: colors.badge, color: colors.badgeText, border: `1px solid ${colors.border}`, fontFamily: "'Sora',sans-serif", textTransform: "uppercase", flexShrink: 0 }}>{cohort.discipline.program_type}</span>
           {!cohort.term.is_active && (
-            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".5px", padding: "3px 8px", borderRadius: 99, background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", fontFamily: "'Sora',sans-serif", textTransform: "uppercase" }}>Archived</span>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".5px", padding: "4px 11px", borderRadius: 99, background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", fontFamily: "'Sora',sans-serif", textTransform: "uppercase", flexShrink: 0 }}>Archived</span>
+          )}
+          {cohort.is_scheduled && (
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".5px", padding: "4px 11px", borderRadius: 99, background: "#d1fae5", color: "#065f46", border: "1px solid #6ee7b7", fontFamily: "'Sora',sans-serif", textTransform: "uppercase", flexShrink: 0 }}>✓ Scheduled</span>
           )}
         </div>
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".2px", padding: "4px 11px", borderRadius: 99, background: "rgba(255,255,255,0.92)", color: "#1e1b4b", border: `1px solid ${colors.border}`, fontFamily: "'Sora',sans-serif", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{cohort.discipline.name}</span>
@@ -494,9 +550,45 @@ function CohortCard({ cohort, onOpen }: { cohort: UICohort; onOpen: () => void }
           {cohort.courses.length > 4 && <span style={{ fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 5, background: "#f3f4f6", color: "#6b7280" }}>+{cohort.courses.length - 4} more</span>}
         </div>
       </div>
-      <div style={{ padding: "12px 20px 20px" }}>
+      <div style={{ padding: "12px 20px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
         <button onClick={e => { e.stopPropagation(); onOpen(); }} style={{ width: "100%", padding: "12px 0", borderRadius: 12, border: "none", background: hovered ? `linear-gradient(135deg, ${colors.text}, ${colors.dot})` : `linear-gradient(135deg, ${colors.dot}, ${colors.text})`, color: "#fff", fontFamily: "'Sora',sans-serif", fontSize: 13.5, fontWeight: 700, cursor: "pointer", letterSpacing: ".2px", transition: "background .2s ease", boxShadow: hovered ? `0 8px 24px ${colors.text}50` : `0 2px 8px ${colors.text}30` }}>View Cohort Details →</button>
+        <button
+          onClick={handleSchedule}
+          disabled={isSchedulerDisabled}
+          title={!cohort.term.is_active ? "This term is not active" : undefined}
+          onMouseEnter={() => setSchedulerHovered(true)}
+          onMouseLeave={() => setSchedulerHovered(false)}
+          style={{
+            width: "100%", padding: "10px 0", borderRadius: 12,
+            border: `1.5px solid ${isSchedulerDisabled ? colors.border : (schedulerHovered ? colors.text + "55" : colors.border)}`,
+            background: isSchedulerDisabled ? "#f1f5f9" : (schedulerHovered ? colors.badge : "#fff"),
+            color: isSchedulerDisabled ? "#94a3b8" : colors.text,
+            fontFamily: "'Sora',sans-serif", fontSize: 12.5, fontWeight: 700,
+            cursor: isSchedulerDisabled ? "not-allowed" : "pointer",
+            letterSpacing: ".15px",
+            transition: "background .15s ease, border-color .15s ease, box-shadow .15s ease",
+            boxShadow: (!isSchedulerDisabled && schedulerHovered) ? `0 4px 14px ${colors.text}22` : "none",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            opacity: isSchedulerDisabled ? 0.65 : 1,
+          }}
+        >
+          {isScheduling ? (
+            <>
+              <span style={{ display: "inline-block", width: 13, height: 13, border: `2px solid ${colors.border}`, borderTopColor: colors.text, borderRadius: "50%", animation: "spin .7s linear infinite" }} />
+              Running Scheduler…
+            </>
+          ) : "⚡ Run Scheduler"}
+        </button>
       </div>
+
+      {rescheduleConfirm !== null && (
+        <ConfirmDialog
+          message={`Re-schedule ${cohort.discipline.code} — Year ${cohort.year_level}?\n${rescheduleConfirm}`}
+          confirmLabel="Reschedule Anyway"
+          onConfirm={() => { setRescheduleConfirm(null); doSchedule(true); }}
+          onCancel={() => setRescheduleConfirm(null)}
+        />
+      )}
     </div>
   );
 }
@@ -553,7 +645,7 @@ function CohortDetailModal({ compositeId, termFilter, selectedDiscipline, onClos
     cohort?.term?.id
   );
   // Fetch teachers from the API
-  const { data: teachers = [] } = useTeachers();
+  const { data: teachers = [] } = useTeachers(cohort?.discipline?.department?.id);
   // Fetch terms from the API for the edit-title dropdown
   const { data: terms = [], isLoading: isLoadingTerms } = useTerms();
 
@@ -749,13 +841,13 @@ function CohortDetailModal({ compositeId, termFilter, selectedDiscipline, onClos
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <CustomSelect
                       value={editYear}
-                      onChange={setEditYear}
+                      onChange={(val: number) => setEditYear(val)}
                       options={[1, 2, 3, 4].map(y => ({ value: y, label: `Year ${y}` }))}
                       style={{ width: 110 }}
                     />
                     <CustomSelect
                       value={editTermId}
-                      onChange={setEditTermId}
+                      onChange={(val: number) => setEditTermId(val)}
                       options={isLoadingTerms ? [] : terms.map((t: TermOption) => ({ value: t.id, label: t.name }))}
                       style={{ width: 140 }}
                     />
@@ -980,18 +1072,21 @@ function CohortDetailModal({ compositeId, termFilter, selectedDiscipline, onClos
       {confirmDelCourse && <ConfirmDialog message={`Remove ${confirmDelCourse} from this cohort?`} onConfirm={() => deleteCourse(confirmDelCourse)} onCancel={() => setConfirmDelCourse(null)} />}
       {confirmDelete && <ConfirmDialog
         message={`Delete the entire cohort "Year ${cohort.year_level} — ${cohort.term.name}"?`}
-        onConfirm={() => runDeleteCohort(cohort.compositeId, {
-          onSuccess: () => { onDelete(cohort.compositeId); onClose(); },
-          onError: (err: unknown) => {
-            const status = (err as { response?: { status?: number } })?.response?.status;
-            if (status === 404) {
-              // Already gone — treat as success, close the modal
-              onDelete(cohort.compositeId); onClose();
-            } else {
-              onToast("Failed to delete cohort", "error");
-            }
+        onConfirm={() => runDeleteCohort(
+          { discipline_id: cohort.discipline.id, term_id: cohort.term.id, year_level: cohort.year_level },
+          {
+            onSuccess: () => { onDelete(cohort.compositeId); onClose(); },
+            onError: (err: unknown) => {
+              const status = (err as { response?: { status?: number } })?.response?.status;
+              if (status === 404) {
+                // Already gone — treat as success, close the modal
+                onDelete(cohort.compositeId); onClose();
+              } else {
+                onToast("Failed to delete cohort", "error");
+              }
+            },
           },
-        })}
+        )}
         onCancel={() => setConfirmDelete(false)}
       />}
     </>
@@ -1022,7 +1117,6 @@ function NewCohortModal({
   // ─── Reference data ─────────────────────────────────────────────────────
   const { data: disciplines = [], isLoading: isLoadingDisciplines } = useDisciplines();
   const { data: terms = [], isLoading: isLoadingTerms } = useTerms();
-  const { data: wTeachers = [], isLoading: isLoadingTeachers } = useTeachers();
 
   const activeTerm = terms.find((t: TermOption) => t.is_active);
 
@@ -1048,33 +1142,11 @@ function NewCohortModal({
     }
   }, [disciplines, initialDisciplineId]);
 
-  // Filter teachers by selected discipline's department
+  // Derive the selected discipline object (for department-filtered teacher query)
   const selectedDisciplineObj = disciplines.find((d: DisciplineOption) => d.id === form.disciplineId);
-  const departmentTeachers = wTeachers.filter((t: TeacherOption) => {
-    if (!selectedDisciplineObj) return true;
-    const discDeptId = selectedDisciplineObj.department?.id;
-    const discDeptName = selectedDisciplineObj.department?.name?.toLowerCase();
-    const discName = selectedDisciplineObj.name.toLowerCase();
-    const discCode = selectedDisciplineObj.code.toLowerCase();
 
-    if (discDeptId && t.department?.id) {
-      return t.department.id === discDeptId;
-    }
-    if (t.department?.name) {
-      const dName = t.department.name.toLowerCase();
-      if (discDeptName && dName === discDeptName) return true;
-      if (dName === discName || dName.includes(discCode)) return true;
-    }
-    if (t.department_name) {
-      const dName = t.department_name.toLowerCase();
-      if (discDeptName && dName === discDeptName) return true;
-      if (dName === discName || dName.includes(discCode)) return true;
-    }
-    return false;
-  });
-
-  // Fallback to all teachers if no teacher matches the discipline's department
-  const displayTeachers = departmentTeachers.length > 0 ? departmentTeachers : wTeachers;
+  // Fetch teachers filtered to the selected discipline's department (server-side)
+  const { data: wTeachers = [], isLoading: isLoadingTeachers } = useTeachers(selectedDisciplineObj?.department?.id);
 
   // Bind active term ID silently
   useEffect(() => {
@@ -1272,14 +1344,16 @@ function NewCohortModal({
                             <div key={letter} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 12px", borderRadius: 9, background: "#faf5ff", border: "1.5px solid #ede9fe" }}>
                               <div style={{ width: 30, height: 30, borderRadius: 7, flexShrink: 0, background: `linear-gradient(135deg, ${ct.dot}, ${ct.color})`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", boxShadow: `0 2px 8px ${ct.color}30` }}>{letter}</div>
                               <span style={{ fontSize: 11.5, fontWeight: 600, color: "#374151", minWidth: 50 }}>Grp {letter}</span>
-                              <select value={val} onChange={e => setCoordinator(course.code, letter, Number(e.target.value))}
-                                style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${val ? ct.color + "55" : "#ede9fe"}`, background: val ? ct.bg : "#fff", fontSize: 12.5, color: val ? ct.color : "#94a3b8", fontFamily: "'Sora',sans-serif", fontWeight: val ? 600 : 400, outline: "none", cursor: "pointer" }}>
-                                <option value={0}>— Unassigned —</option>
-                                {isLoadingTeachers
-                                  ? <option disabled>Loading teachers…</option>
-                                  : displayTeachers.map((t: TeacherOption) => <option key={t.id} value={t.id}>{t.user_name}</option>)
-                                }
-                              </select>
+                              <CustomSelect
+                                value={val}
+                                onChange={v => setCoordinator(course.code, letter, v)}
+                                options={[
+                                  { value: 0, label: "— Unassigned —" },
+                                  ...wTeachers.map((t: TeacherOption) => ({ value: t.id, label: t.user_name }))
+                                ]}
+                                disabled={isLoadingTeachers}
+                                style={{ flex: 1 }}
+                              />
                             </div>
                           );
                         })}
@@ -1472,7 +1546,7 @@ export default function StudyGroupsPage() {
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 22 }}>
-            {cohorts.map(cohort => <CohortCard key={cohort.id} cohort={cohort} onOpen={() => setDetailCompositeId(cohort.compositeId)} />)}
+            {cohorts.map(cohort => <CohortCard key={cohort.id} cohort={cohort} onOpen={() => setDetailCompositeId(cohort.compositeId)} onToast={showToast} />)}
           </div>
         )
       )}

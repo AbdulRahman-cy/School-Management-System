@@ -14,7 +14,20 @@ from .serializers import (
     CourseClassSerializer,
     CohortBulkCreateSerializer,
     CohortReadSerializer,
+    CourseFilterSerializer,
+    AddStudyGroupRequestSerializer,
+    CohortIdentifierSerializer,
+    StudyGroupCapacitySerializer,   
 )
+from django.db.models import Q
+from django.shortcuts import get_object_or_404
+from django.db import IntegrityError
+from scheduling.services.cohort_scheduler import (
+    CohortSchedulerService, SchedulingError, InfeasibleScheduleError,
+)
+from .serializers import ScheduleCohortRequestSerializer, ScheduleCohortResponseSerializer
+from scheduling.models import Session
+
 
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
@@ -37,36 +50,24 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        discipline_id = self.request.query_params.get("discipline_id") or self.request.query_params.get("discipline")
-        year_level = self.request.query_params.get("year_level")
-        term_id = self.request.query_params.get("term_id") or self.request.query_params.get("term")
 
-        if discipline_id and year_level and term_id:
-            try:
-                term = Term.objects.get(id=term_id)
-                season = term.season
-                if season:
-                    season_qs = qs.filter(
-                        blueprints__discipline_id=discipline_id,
-                        blueprints__year_level=year_level,
-                        blueprints__season=season,
-                    ).distinct()
-                    if season_qs.exists():
-                        return season_qs
-                return qs.filter(
-                    blueprints__discipline_id=discipline_id,
-                    blueprints__year_level=year_level,
-                ).distinct()
-            except (Term.DoesNotExist, ValueError):
-                return qs.none()
-        elif discipline_id and year_level:
-            return qs.filter(
-                blueprints__discipline_id=discipline_id,
-                blueprints__year_level=year_level,
-            ).distinct()
-        elif discipline_id:
-            return qs.filter(blueprints__discipline_id=discipline_id).distinct()
-        return qs
+        filters = CourseFilterSerializer(data=self.request.query_params)
+        filters.is_valid(raise_exception=True)
+        discipline_id = filters.validated_data.get("discipline_id")
+        year_level = filters.validated_data.get("year_level")
+        term_id = filters.validated_data.get("term_id")
+
+        if not discipline_id:
+            return qs
+
+        blueprint_match = Q(blueprints__discipline_id=discipline_id)
+        if year_level:
+            blueprint_match &= Q(blueprints__year_level=year_level)
+        if term_id:
+            term = get_object_or_404(Term, pk=term_id)
+            blueprint_match &= Q(blueprints__season=term.season)
+
+        return qs.filter(blueprint_match).distinct()
 
 class RoomViewSet(viewsets.ModelViewSet):   
     queryset = Room.objects.all()
@@ -74,56 +75,72 @@ class RoomViewSet(viewsets.ModelViewSet):
   
 
 class StudyGroupViewSet(viewsets.ModelViewSet):
+    # For the normal 5 http methods (list, retrieve, create, update, destroy) on StudyGroup url like /api/academics/groups/
     queryset = StudyGroup.objects.all()
     serializer_class = StudyGroupSerializer
 
-    @action(detail=False, methods=["get"], url_path="cohorts")
+    @action(detail=False, methods=["get", "delete"], url_path="cohorts")
     def cohorts(self, request):
-        # 1. Base query with optimizations
+        if request.method == "DELETE":
+            return self._delete_cohort(request)
+        return self._list_cohorts(request)
+
+    def _list_cohorts(self, request):
+        # everything that used to be directly inside `cohorts()` — unchanged
         qs = (
             StudyGroup.objects
             .select_related("discipline", "discipline__department", "term")
-            .prefetch_related(
-                "course_classes__course",
-                "course_classes__coordinator__user",
-            )
+            .prefetch_related("course_classes__course", "course_classes__coordinator__user")
             .order_by("discipline__code", "term__start_date", "year_level", "number")
         )
-
-        # 2. Apply the term_status filter exactly like EnrollmentViewSet
         term_status = request.query_params.get('term_status', 'active')
-        
         if term_status == 'all':
             pass
         elif term_status == 'past':
             qs = qs.filter(term__is_active=False)
         else:
-            # Default to only showing the active term
             qs = qs.filter(term__is_active=True)
 
-        # 3. Intercept discipline_id query param
         discipline_id = request.query_params.get('discipline_id') or request.query_params.get('discipline')
         if discipline_id:
+            try:
+                discipline_id = int(discipline_id)
+            except (ValueError, TypeError):
+                return Response({"detail": "Invalid discipline_id."}, status=status.HTTP_400_BAD_REQUEST)
             qs = qs.filter(discipline_id=discipline_id)
 
-        # 4. Proceed with the standard grouping logic
         cohort_map = {}
         for sg in qs:
             key = (sg.discipline_id, sg.term_id, sg.year_level)
             if key not in cohort_map:
                 cohort_map[key] = {
-                    "discipline":     sg.discipline,
-                    "term":           sg.term,
-                    "year_level":     sg.year_level,
-                    "groups":         [],
-                    "course_classes": [],
+                    "discipline": sg.discipline, "term": sg.term, "year_level": sg.year_level,
+                    "groups": [], "course_classes": [],
                 }
             cohort_map[key]["groups"].append(sg)
             cohort_map[key]["course_classes"].extend(sg.course_classes.all())
 
-        cohort_list = list(cohort_map.values())
-        serializer = CohortReadSerializer(cohort_list, many=True)
+        scheduled_class_ids = set(Session.objects.values_list("course_class_id", flat=True).distinct())
+        for cohort in cohort_map.values():
+            cohort["is_scheduled"] = any(cc.id in scheduled_class_ids for cc in cohort["course_classes"])
+
+        serializer = CohortReadSerializer(list(cohort_map.values()), many=True)
         return Response(serializer.data)
+
+    def _delete_cohort(self, request):
+        # everything that used to be directly inside `delete_cohort()` — unchanged
+        serializer = CohortIdentifierSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        discipline = serializer.validated_data["discipline_id"]
+        term = serializer.validated_data["term_id"]
+        year_level = serializer.validated_data["year_level"]
+
+        study_groups = StudyGroup.objects.filter(discipline=discipline, term=term, year_level=year_level)
+        if not study_groups.exists():
+            return Response({"detail": "No cohort found for the given identifiers."}, status=status.HTTP_404_NOT_FOUND)
+
+        study_groups.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=["post"], url_path="bulk-cohort")
     def bulk_create_cohort(self, request):
@@ -141,92 +158,102 @@ class StudyGroupViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED
         )
 
+
+
     @action(detail=False, methods=["post"], url_path="add-group")
     def add_study_group_to_cohort(self, request):
-        discipline_id = request.data.get("discipline_id")
-        term_id = request.data.get("term_id")
-        year_level = request.data.get("year_level")
-        number = request.data.get("number")
-        capacity = request.data.get("capacity", 50)
+        serializer = AddStudyGroupRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        discipline = data["discipline_id"]
+        term = data["term_id"]
 
-        if not all([discipline_id, term_id, year_level, number]):
-            return Response(
-                {"detail": "Missing required fields."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        with transaction.atomic():
-            study_group = StudyGroup.objects.create(
-                discipline_id=discipline_id,
-                term_id=term_id,
-                year_level=year_level,
-                number=number,
-                capacity=capacity
-            )
-            # Automatically clone existing course classes for this new group
-            existing_classes = CourseClass.objects.filter(
-                group__discipline_id=discipline_id,
-                group__term_id=term_id,
-                group__year_level=year_level
-            ).values('course_id').distinct()
-
-            for item in existing_classes:
-                CourseClass.objects.create(
-                    course_id=item['course_id'],
-                    group=study_group,
-                    coordinator=None
+        try:
+            with transaction.atomic():
+                study_group = StudyGroup.objects.create(
+                    discipline=discipline, term=term,
+                    year_level=data["year_level"], number=data["number"],
+                    capacity=data.get("capacity", 50),
                 )
+                course_ids = (
+                    CourseClass.objects
+                    .filter(group__discipline=discipline, group__term=term, group__year_level=data["year_level"])
+                    .values_list("course_id", flat=True)
+                    .distinct()
+                )
+                CourseClass.objects.bulk_create([
+                    CourseClass(course_id=cid, group=study_group, coordinator=None)
+                    for cid in course_ids
+                ])
+        except IntegrityError as exc:
+            if "unique_study_group" in str(exc):
+                return Response(
+                    {"detail": f"Group number {data['number']} already exists for this cohort."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            raise
 
         return Response(
             {"message": "Study group added successfully", "id": study_group.pk},
-            status=status.HTTP_201_CREATED
+            status=status.HTTP_201_CREATED,
         )
 
-    @action(
-        detail=False,
-        methods=["delete"],
-        url_path=r"cohorts/(?P<composite_id>[^/.]+)",
-    )
-    def delete_cohort(self, request, composite_id: str):
-        """
-        DELETE /api/academics/groups/cohorts/{discipline_id}_{term_id}_{year_level}/
+    @action(detail=False, methods=["post"], url_path="schedule-cohort")
+    def schedule_cohort(self, request):
+        serializer = ScheduleCohortRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
 
-        Atomically deletes all CourseClass rows (PROTECT FK must go first),
-        then deletes all StudyGroup rows for the matching cohort.
-        Returns 204 on success or 404 if no groups match.
-        """
-        # Parse composite key: "{discipline_id}_{term_id}_{year_level}"
+        service = CohortSchedulerService(
+            discipline=data["discipline_id"],
+            term=data["term_id"],
+            year_level=data["year_level"],
+            time_limit=data.get("time_limit", 60),
+            force=data.get("force", False),
+        )
+
         try:
-            parts = composite_id.split("_")
-            discipline_id = int(parts[0])
-            term_id       = int(parts[1])
-            year_level    = int(parts[2])
-        except (ValueError, IndexError):
-            return Response(
-                {"detail": "Invalid composite_id format. Expected '{discipline_id}_{term_id}_{year_level}'."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            result = service.run(dry_run=data.get("dry_run", False))
+        except InfeasibleScheduleError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except SchedulingError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        study_groups = StudyGroup.objects.filter(
-            discipline_id=discipline_id,
-            term_id=term_id,
-            year_level=year_level,
+        payload = {
+            "status": result.status,
+            "sessions_created": result.sessions_created,
+            "course_classes_scheduled": result.course_classes_scheduled,
+            "solve_time_seconds": round(result.solve_time_seconds, 2),
+            "dry_run": result.dry_run,
+        }
+        code = status.HTTP_200_OK if result.dry_run else status.HTTP_201_CREATED
+        return Response(ScheduleCohortResponseSerializer(payload).data, status=code)
+
+    @action(detail=True, methods=["get"], url_path="capacity")
+    def capacity(self, request, pk=None):
+        from records.models import Enrollment 
+                                                 
+        study_group = self.get_object()
+        taken = (
+            Enrollment.objects
+            .filter(course_class__group=study_group, status=Enrollment.EnrollmentStatus.ENROLLED)
+            .values("student")
+            .distinct()
+            .count()
         )
-
-        if not study_groups.exists():
-            return Response(
-                {"detail": "No cohort found for the given composite ID."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        with transaction.atomic():
-            # Delete dependent CourseClass rows first to avoid PROTECT violation
-            CourseClass.objects.filter(group__in=study_groups).delete()
-            study_groups.delete()
-
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
+        data = {
+            "id": study_group.id,
+            "capacity": study_group.capacity,
+            "remaining": max(study_group.capacity - taken, 0),
+        }
+        return Response(StudyGroupCapacitySerializer(data).data)
 
 class CourseClassViewSet(viewsets.ModelViewSet):
     queryset = CourseClass.objects.all()
     serializer_class = CourseClassSerializer
+
+
+
+
+
+

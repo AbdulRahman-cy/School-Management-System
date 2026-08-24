@@ -16,6 +16,7 @@ services:
     env_file:
       - .env
     volumes:
+      - .:/app
       - static_volume:/app/staticfiles
       - media_volume:/app/media
     expose:

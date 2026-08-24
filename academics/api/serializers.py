@@ -3,6 +3,8 @@ from rest_framework import serializers
 from academics.models import Department, Discipline, Term, Course, Room, StudyGroup, CourseClass
 from users.models import TeacherProfile
 
+class TeacherFilterSerializer(serializers.Serializer):
+    department_id = serializers.IntegerField(required=False)
 
 class DepartmentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -47,7 +49,7 @@ class StudyGroupSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = StudyGroup
-        fields = ["id", "discipline", "term", "year_level", "number", "created_at", "updated_at"]
+        fields = ["id", "discipline", "term", "year_level", "number", "capacity", "created_at", "updated_at"]
 
 
 class CourseClassSerializer(serializers.ModelSerializer):
@@ -233,6 +235,74 @@ class CohortReadSerializer(serializers.Serializer):
     year_level     = serializers.IntegerField()
     groups         = CohortGroupReadSerializer(many=True)
     course_classes = CohortCourseClassReadSerializer(many=True)
+    is_scheduled   = serializers.BooleanField()
 
     def get_id(self, obj) -> str:
         return f"{obj['discipline'].id}_{obj['term'].id}_{obj['year_level']}"
+
+class CourseFilterSerializer(serializers.Serializer):
+    """
+    Query-param contract for GET /academics/courses/.
+    discipline_id is the anchor — year_level and term_id only narrow
+    the results further if discipline_id is present; without it they're ignored,
+    same as before.
+    """
+    discipline_id = serializers.IntegerField(required=False)
+    year_level = serializers.IntegerField(required=False, min_value=1, max_value=4)
+    term_id = serializers.IntegerField(required=False)
+
+
+
+class AddStudyGroupRequestSerializer(serializers.Serializer):
+    discipline_id = serializers.PrimaryKeyRelatedField(
+        queryset=Discipline.objects.all(),
+        error_messages={"does_not_exist": "The selected discipline does not exist."},
+    )
+    term_id = serializers.PrimaryKeyRelatedField(
+        queryset=Term.objects.all(),
+        error_messages={"does_not_exist": "The selected term does not exist."},
+    )
+    year_level = serializers.IntegerField(min_value=1, max_value=4)
+    number = serializers.IntegerField(min_value=1)
+    capacity = serializers.IntegerField(min_value=1, default=50, required=False)
+
+
+class CohortIdentifierSerializer(serializers.Serializer):
+    discipline_id = serializers.PrimaryKeyRelatedField(
+        queryset=Discipline.objects.all(),
+        error_messages={"does_not_exist": "No discipline with this ID."},
+    )
+    term_id = serializers.PrimaryKeyRelatedField(
+        queryset=Term.objects.all(),
+        error_messages={"does_not_exist": "No term with this ID."},
+    )
+    year_level = serializers.IntegerField(min_value=1, max_value=4)
+
+
+class ScheduleCohortRequestSerializer(serializers.Serializer):
+    discipline_id = serializers.PrimaryKeyRelatedField(
+        queryset=Discipline.objects.all(),
+        error_messages={"does_not_exist": "The selected discipline does not exist."},
+    )
+    term_id = serializers.PrimaryKeyRelatedField(
+        queryset=Term.objects.all(),
+        error_messages={"does_not_exist": "The selected term does not exist."},
+    )
+    year_level = serializers.IntegerField(min_value=1, max_value=4)
+    time_limit = serializers.IntegerField(min_value=5, max_value=300, default=60, required=False)
+    dry_run = serializers.BooleanField(default=False, required=False)
+    force = serializers.BooleanField(default=False, required=False)
+
+
+class ScheduleCohortResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()
+    sessions_created = serializers.IntegerField()
+    course_classes_scheduled = serializers.IntegerField()
+    solve_time_seconds = serializers.FloatField()
+    dry_run = serializers.BooleanField()
+
+
+class StudyGroupCapacitySerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    capacity = serializers.IntegerField()
+    remaining = serializers.IntegerField()

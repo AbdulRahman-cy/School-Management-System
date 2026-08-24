@@ -56,7 +56,7 @@ class Session(TimestampedModel):
     ALLOWED_ROOM_TYPES = {
         SessionType.LAB: ["LAB"],
         SessionType.LECTURE: ["LECTURE"],
-        SessionType.TUTORIAL: ["TUTORIAL"],
+        SessionType.TUTORIAL: ["SEMINAR"],
     }
 
     course_class = models.ForeignKey(

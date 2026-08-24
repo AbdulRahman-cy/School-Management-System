@@ -7,6 +7,7 @@ import { getCourseColorTheme } from "../courseColors";
 import ExamSchedulePage from "./ExamSchedulePage";
 import StudyGroupsPage from "./StudyGroupsPage";
 import GradesPage from "./GradesPage";
+import EnrollmentPage from "./EnrollmentPage";
 import { useAuth } from '../context/AuthContext';
 
 
@@ -792,6 +793,9 @@ export default function UniversityPortal() {
 
             ) : activeNav === "exams" ? (
               <ExamSchedulePage studentId={STUDENT_ID} />
+
+            ) : activeNav === "enrollment" ? (
+              <EnrollmentPage />
 
             ) : (
               /* Construction skeleton — all other pages */

@@ -152,3 +152,4 @@ class StudentProfile(TimestampedModel, SoftDeleteModel):
     
     def __str__(self):
         return f"{self.user.full_name} — {self.discipline}"
+

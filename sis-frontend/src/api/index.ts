@@ -77,6 +77,7 @@ export interface CohortDiscipline {
   code: string;
   name: string;
   program_type: "GSP" | "SSP";
+  department: { id: number; name: string } | null;
 }
 
 export interface CohortTerm {
@@ -93,6 +94,7 @@ export interface Cohort {
   year_level: number;
   groups: CohortGroup[];
   course_classes: CohortCourseClass[];
+  is_scheduled: boolean;
 }
 
 /**
@@ -128,7 +130,9 @@ export const queryKeys = {
   disciplines:      ()                                                          => ["disciplines"] as const,
   terms:          ()                                 => ["terms"] as const,
   courses:        ()                                 => ["courses"] as const,
-  teachers:       ()                                 => ["teachers"] as const,
+  teachers:       (departmentId?: number)            => ["teachers", { departmentId }] as const,
+  availableGroups: ()                                => ["available-groups"] as const,
+  groupCapacity:   (groupId: number)                 => ["group-capacity", groupId] as const,
 };
  
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
@@ -300,8 +304,10 @@ async function fetchCourses(): Promise<CourseOption[]> {
   return data;
 }
 
-async function fetchTeachers(): Promise<TeacherOption[]> {
-  const { data } = await apiClient.get<TeacherOption[]>("/users/teachers/");
+async function fetchTeachers(departmentId?: number): Promise<TeacherOption[]> {
+  const { data } = await apiClient.get<TeacherOption[]>("/users/teachers/", {
+    params: departmentId ? { department_id: departmentId } : undefined,
+  });
   return data;
 }
 
@@ -337,14 +343,42 @@ async function createCohort(payload: CohortBulkCreatePayload): Promise<unknown> 
   return data;
 }
 
-async function deleteCohort(compositeId: string): Promise<void> {
+export interface DeleteCohortPayload {
+  discipline_id: number;
+  term_id: number;
+  year_level: number;
+}
+
+async function deleteCohort(payload: DeleteCohortPayload): Promise<void> {
   try {
-    await apiClient.delete(`/academics/groups/cohorts/${compositeId}/`);
+    await apiClient.delete("/academics/groups/cohorts/", { params: payload });
   } catch (err: unknown) {
     // 404 means the cohort is already gone — treat as success
     if ((err as { response?: { status?: number } })?.response?.status === 404) return;
     throw err;
   }
+}
+
+export interface ScheduleCohortPayload {
+  discipline_id: number;
+  term_id: number;
+  year_level: number;
+  time_limit?: number;
+  dry_run?: boolean;
+  force?: boolean;
+}
+
+export interface ScheduleCohortResult {
+  status: "OPTIMAL" | "FEASIBLE";
+  sessions_created: number;
+  course_classes_scheduled: number;
+  solve_time_seconds: number;
+  dry_run: boolean;
+}
+
+async function scheduleCohort(payload: ScheduleCohortPayload): Promise<ScheduleCohortResult> {
+  const { data } = await apiClient.post<ScheduleCohortResult>("/academics/groups/schedule-cohort/", payload);
+  return data;
 }
 
 async function createCourseClass(payload: {
@@ -411,6 +445,54 @@ async function addStudyGroup(payload: AddStudyGroupPayload): Promise<unknown> {
   return data;
 }
 
+// ─── Enrollment (student self-service) types ───────────────────────────────────
+
+export interface SessionDetail {
+  id: number;
+  day: string;
+  period: string;
+  room_code: string;
+  room_name: string;
+}
+
+export interface AvailableCourseClass {
+  id: number;
+  course_code: string;
+  course_title: string;
+  coordinator_name: string | null;
+  lecture: SessionDetail | null;
+  tutorial: SessionDetail | null;
+  lab: SessionDetail | null;
+}
+
+export interface AvailableStudyGroup {
+  id: number;
+  number: number;
+  capacity: number;
+  remaining: number;
+  is_member: boolean;
+  is_scheduled: boolean;
+  course_classes: AvailableCourseClass[];
+}
+
+export type AvailableGroupsResponse =
+  | AvailableStudyGroup[]
+  | { detail: string; graduated: true };
+
+export const isGraduated = (
+  data: AvailableGroupsResponse
+): data is { detail: string; graduated: true } => !Array.isArray(data);
+
+export interface StudyGroupCapacity {
+  id: number;
+  capacity: number;
+  remaining: number;
+}
+
+export interface EnrollRequest {
+  study_group_id: number;
+}
+
 // ─── Reference data hooks ─────────────────────────────────────────────────────
 
 export function useDisciplines() {
@@ -437,10 +519,10 @@ export function useCourses() {
   });
 }
 
-export function useTeachers() {
+export function useTeachers(departmentId?: number) {
   return useQuery({
-    queryKey:  queryKeys.teachers(),
-    queryFn:   fetchTeachers,
+    queryKey:  queryKeys.teachers(departmentId),
+    queryFn:   () => fetchTeachers(departmentId),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -488,6 +570,14 @@ export function useDeleteCohort() {
         invalidate();
       }
     },
+  });
+}
+
+export function useScheduleCohort() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: scheduleCohort,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["cohorts"] }),
   });
 }
 
@@ -562,6 +652,52 @@ export function useAddStudyGroup() {
     mutationFn: addStudyGroup,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cohorts"] });
+    },
+  });
+}
+
+// ─── Enrollment (student self-service) fetchers & hooks ────────────────────────
+
+async function fetchAvailableGroups(): Promise<AvailableGroupsResponse> {
+  const { data } = await apiClient.get<AvailableGroupsResponse>("/records/enrollments/available-groups/");
+  return data;
+}
+
+async function fetchGroupCapacity(groupId: number): Promise<StudyGroupCapacity> {
+  const { data } = await apiClient.get<StudyGroupCapacity>(`/academics/groups/${groupId}/capacity/`);
+  return data;
+}
+
+async function enroll(payload: EnrollRequest): Promise<unknown> {
+  const { data } = await apiClient.post("/records/enrollments/enroll/", payload);
+  return data;
+}
+
+export function useAvailableGroups() {
+  return useQuery({
+    queryKey: queryKeys.availableGroups(),
+    queryFn:  fetchAvailableGroups,
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useGroupCapacity(groupId: number, enabled: boolean = true) {
+  return useQuery({
+    queryKey: queryKeys.groupCapacity(groupId),
+    queryFn:  () => fetchGroupCapacity(groupId),
+    enabled,
+    refetchInterval: 5000,
+    staleTime: 0,
+  });
+}
+
+export function useEnroll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: enroll,
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.availableGroups() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.groupCapacity(variables.study_group_id) });
     },
   });
 }
