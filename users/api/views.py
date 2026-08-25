@@ -11,6 +11,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from users.models import BaseUser, StudentProfile, TeacherProfile
 
+from .permissions import IsAdmin, IsAdminOrReadOnly
 from .serializers import (
     BaseUserSerializer,
     CustomTokenObtainPairSerializer,
@@ -206,22 +207,26 @@ class MeView(APIView):
 
 
 class BaseUserViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdmin]
     queryset = BaseUser.objects.all()
     serializer_class = BaseUserSerializer
 
 
 class TeacherProfileViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     queryset = TeacherProfile.objects.all()
     serializer_class = TeacherProfileSerializer
 
 
 class StudentProfileViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     queryset = StudentProfile.objects.all()
     serializer_class = StudentProfileSerializer
 
-from academics.api.serializers import TeacherFilterSerializer 
+from academics.api.serializers import TeacherFilterSerializer
 
 class TeacherProfileViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = TeacherProfileSerializer
 
     def get_queryset(self):

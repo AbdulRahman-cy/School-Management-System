@@ -2,7 +2,7 @@ from django.db import transaction
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from academics.api.permissions import IsAdminOrReadOnly
+from users.api.permissions import IsAdminOrReadOnly
 from academics.models import Department, Discipline, StudyGroup, Term, Course, Room, CourseClass
 from .serializers import (
     CourseSerializer,
@@ -30,21 +30,25 @@ from scheduling.models import Session
 
 
 class DepartmentViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     queryset = Department.objects.all()
     serializer_class = DepartmentSerializer
-   
+
 
 class DisciplineViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     queryset = Discipline.objects.all()
     serializer_class = DisciplineSerializer
-    
+
 
 class TermViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     queryset = Term.objects.all()
     serializer_class = TermSerializer
 
 
 class CourseViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
 
@@ -69,13 +73,15 @@ class CourseViewSet(viewsets.ModelViewSet):
 
         return qs.filter(blueprint_match).distinct()
 
-class RoomViewSet(viewsets.ModelViewSet):   
+class RoomViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     queryset = Room.objects.all()
     serializer_class = RoomSerializer
-  
+
 
 class StudyGroupViewSet(viewsets.ModelViewSet):
     # For the normal 5 http methods (list, retrieve, create, update, destroy) on StudyGroup url like /api/academics/groups/
+    permission_classes = [IsAdminOrReadOnly]
     queryset = StudyGroup.objects.all()
     serializer_class = StudyGroupSerializer
 
@@ -249,6 +255,7 @@ class StudyGroupViewSet(viewsets.ModelViewSet):
         return Response(StudyGroupCapacitySerializer(data).data)
 
 class CourseClassViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     queryset = CourseClass.objects.all()
     serializer_class = CourseClassSerializer
 

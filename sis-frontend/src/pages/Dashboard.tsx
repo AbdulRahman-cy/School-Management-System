@@ -165,30 +165,19 @@ const ALL_STUDENT_NAV_ITEMS = [
   { id: "warnings",    label: "Academic Standing", icon: "△", group: "ADMIN" },
 ];
 
-const PRESIDENT_EMAIL = "t.michelle.reyes0@alexu.edu.eg";
-
 import TeacherDashboard from "./TeacherDashboard";
 
 function getNavItems(user: { role: string; email: string } | null) {
   if (!user) return ALL_STUDENT_NAV_ITEMS;
   if (user.role === "STUDENT") return ALL_STUDENT_NAV_ITEMS;
-  if (user.role === "TEACHER") {
-    if (user.email === PRESIDENT_EMAIL) {
-      return [
-        { id: "dashboard", label: "Teacher Dashboard", icon: "⊞", group: "" },
-        { id: "study-groups", label: "Study Groups", icon: "👥", group: "ADMIN" }
-      ];
-    }
+  if (user.role === "ADMIN") {
     return [
       { id: "dashboard", label: "Teacher Dashboard", icon: "⊞", group: "" },
-      { id: "study-groups", label: "Study Groups", icon: "👥", group: "ACADEMIC" }
+      { id: "study-groups", label: "Study Groups", icon: "👥", group: "ADMIN" }
     ];
   }
-  // ADMIN or other — show everything including study-groups
-  return [
-    ...ALL_STUDENT_NAV_ITEMS,
-    { id: "study-groups", label: "Study Groups", icon: "⊞", group: "ADMIN" },
-  ];
+  // fail-closed: unknown/unrecognized roles get the basic student nav, no admin tabs
+  return ALL_STUDENT_NAV_ITEMS;
 }
 
 // ─── Exam Schedule page ───────────────────────────────────────────────────────
@@ -431,7 +420,7 @@ export default function UniversityPortal() {
           {/* Content */}
           <main style={{ flex: 1, padding: "22px", overflowY: "auto" }}>
 
-            {activeNav === "dashboard" && user?.role === "TEACHER" ? (
+            {activeNav === "dashboard" && user?.role === "ADMIN" ? (
               <TeacherDashboard />
             ) : activeNav === "dashboard" ? (
               <>

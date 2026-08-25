@@ -1,7 +1,7 @@
 from rest_framework import viewsets
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
-from .permissions import IsAdminOrReadOnly
+from users.api.permissions import IsAdminOrReadOnly, IsStudent
 from records.models import Enrollment, GradeEntry, AttendanceRecord, Exam, ExamResult, Assignment, StudentSubmission
 from .serializers import (
     EnrollmentSerializer, GradeEntrySerializer, AttendanceRecordSerializer, ExamSerializer,
@@ -12,7 +12,6 @@ from .serializers import (
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
 from records.services.enrollment import EnrollmentService
 from records.services.exceptions import (
     CapacityExceededError, EnrollmentValidationError, NoCourseClassesError, NotScheduledError,
@@ -25,6 +24,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows Enrollments to be viewed or edited.
     """
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = EnrollmentSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
 
@@ -75,11 +75,11 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         serializer = DashboardEnrollmentSerializer(queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=["post"], url_path="enroll", permission_classes=[IsAuthenticated])
+    @action(detail=False, methods=["post"], url_path="enroll", permission_classes=[IsStudent])
     def enroll(self, request):
         student = getattr(request.user, "student_profile", None)
         if student is None:
-            return Response({"detail": "Only students can enroll."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "Only students can perform this action."}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = EnrollRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -104,11 +104,11 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
         return Response(EnrollmentSerializer(enrollments, many=True).data, status=status.HTTP_201_CREATED)
 
-    @action(detail=False, methods=["get"], url_path="available-groups", permission_classes=[IsAuthenticated])
+    @action(detail=False, methods=["get"], url_path="available-groups", permission_classes=[IsStudent])
     def available_groups(self, request):
         student = getattr(request.user, "student_profile", None)
         if student is None:
-            return Response({"detail": "Only students can view this."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "Only students can perform this action."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             groups = get_eligible_study_groups(student)
@@ -122,6 +122,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
 
 class GradeEntryViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = GradeEntrySerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['enrollment']
@@ -132,6 +133,7 @@ class GradeEntryViewSet(viewsets.ModelViewSet):
 
 
 class AttendanceViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = AttendanceRecordSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["student", "session"]
@@ -156,6 +158,7 @@ class AttendanceViewSet(viewsets.ModelViewSet):
 
 
 class ExamViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = ExamSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["course_class", "exam_type"]
@@ -178,6 +181,7 @@ class ExamViewSet(viewsets.ModelViewSet):
 
 
 class AssignmentViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = AssignmentSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["course_class", "assignment_type"]
@@ -200,6 +204,7 @@ class AssignmentViewSet(viewsets.ModelViewSet):
 
 
 class ExamResultViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = ExamResultSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["student", "exam"]
@@ -211,6 +216,7 @@ class ExamResultViewSet(viewsets.ModelViewSet):
 
 
 class StudentSubmissionViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsStudent]
     serializer_class = StudentSubmissionSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["student", "assignment"]

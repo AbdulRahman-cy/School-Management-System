@@ -8,8 +8,8 @@ class SoftDeleteModel(models.Model):
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        abstract = True  # Tells Django NOT to create a separate database table for this
-
+        abstract = True  
+        
     def delete(self, *args, **kwargs):
         """The Soft Delete: flips the boolean instead of erasing the row."""
         self.is_active = False
@@ -27,16 +27,7 @@ class TimestampedModel(models.Model):
     class Meta:
         abstract = True
 
-class ActiveUserManager(UserManager):
-    def get_queryset(self):
-        return super().get_queryset().filter(is_active=True)
-
-class ActiveManager(models.Manager):
-    def get_queryset(self):
-        return super().get_queryset().filter(is_active=True)
-
-
-
+# 1. Base manager must be defined FIRST
 class BaseUserManager_(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
         if not email:
@@ -53,7 +44,17 @@ class BaseUserManager_(BaseUserManager):
         extra_fields.setdefault("is_superuser", True)
         return self.create_user(email, password, **extra_fields)
 
+# 2. Now ActiveUserManager can safely inherit from it
+class ActiveUserManager(BaseUserManager_):
+    def get_queryset(self):
+        return super().get_queryset().filter(is_active=True)
 
+class ActiveManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(is_active=True)
+
+
+# 3. Finally, the models that use these managers
 class BaseUser(AbstractBaseUser, PermissionsMixin, TimestampedModel):
     class Role(models.TextChoices):
         ADMIN   = "ADMIN",   "Admin"
@@ -71,7 +72,7 @@ class BaseUser(AbstractBaseUser, PermissionsMixin, TimestampedModel):
     REQUIRED_FIELDS = ["first_name", "last_name", "role"]
 
     objects = ActiveUserManager()
-    all_objects = UserManager()
+    all_objects = BaseUserManager_()
     
 
     def delete(self, *args, **kwargs):
@@ -139,7 +140,6 @@ class StudentProfile(TimestampedModel, SoftDeleteModel):
         total_credits = 0
 
         for enr in enrollments:
-            # FIX: Only include courses that have officially been assigned grade points (Completed courses)
             if enr.course_grade_points is not None:
                 credits = enr.course_class.course.credits
                 total_quality_points += Decimal(str(enr.course_grade_points)) * credits
@@ -152,4 +152,3 @@ class StudentProfile(TimestampedModel, SoftDeleteModel):
     
     def __str__(self):
         return f"{self.user.full_name} — {self.discipline}"
-

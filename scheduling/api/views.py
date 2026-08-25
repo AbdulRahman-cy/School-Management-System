@@ -2,9 +2,10 @@ from rest_framework import viewsets
 from scheduling.models import Session, Timeslot
 from .serializers import SessionSerializer , TimeslotSerializer, ScheduleSessionSerializer
 from django_filters.rest_framework import DjangoFilterBackend
-from .permissions import IsAdminOrReadOnly
+from users.api.permissions import IsAdminOrReadOnly
 
 class SessionViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = SessionSerializer
 
     def get_queryset(self):
@@ -17,10 +18,12 @@ class SessionViewSet(viewsets.ModelViewSet):
         return queryset
 
 class TimeslotViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     queryset = Timeslot.objects.all()
     serializer_class = TimeslotSerializer
 
 class ScheduleSessionViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = ScheduleSessionSerializer
 
     def get_queryset(self):
