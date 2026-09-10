@@ -8,5 +8,5 @@ router.register(r"schedule-sessions", ScheduleSessionViewSet, basename="schedule
 
 
 urlpatterns = [
-    path("", include(router.urls)),     
-]
+    path("", include(router.urls)),
+]

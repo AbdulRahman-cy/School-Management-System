@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.conf import settings
-from rest_framework import status, viewsets
+from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -10,15 +10,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from users.models import BaseUser, StudentProfile, TeacherProfile
-
-from .permissions import IsAdmin, IsAdminOrReadOnly
-from .serializers import (
-    BaseUserSerializer,
-    CustomTokenObtainPairSerializer,
-    RegisterSerializer,
-    StudentProfileSerializer,
-    TeacherProfileSerializer,
-)
+from users.api.serializers import BaseUserSerializer, CustomTokenObtainPairSerializer, RegisterSerializer
 
 # ─────────────────────────────────────────────────────────────────────
 # Cookie configuration
@@ -42,7 +34,7 @@ REFRESH_COOKIE_MAX_AGE = int(
 def _cookie_kwargs(max_age: int, path: str = '/') -> dict:
     return {
         'httponly': True,
-        'secure':   False,   
+        'secure':   False,
         'samesite': 'Strict',             # blocks CSRF for same-site SPA
         'max_age':  max_age,
         'path':     path,
@@ -204,36 +196,3 @@ class MeView(APIView):
             data['profile_id'] = None
 
         return Response(data)
-
-
-class BaseUserViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdmin]
-    queryset = BaseUser.objects.all()
-    serializer_class = BaseUserSerializer
-
-
-class TeacherProfileViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminOrReadOnly]
-    queryset = TeacherProfile.objects.all()
-    serializer_class = TeacherProfileSerializer
-
-
-class StudentProfileViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminOrReadOnly]
-    queryset = StudentProfile.objects.all()
-    serializer_class = StudentProfileSerializer
-
-from academics.api.serializers import TeacherFilterSerializer
-
-class TeacherProfileViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminOrReadOnly]
-    serializer_class = TeacherProfileSerializer
-
-    def get_queryset(self):
-        qs = TeacherProfile.objects.select_related('user', 'department')
-        filters = TeacherFilterSerializer(data=self.request.query_params)
-        filters.is_valid(raise_exception=True)
-        department_id = filters.validated_data.get('department_id')
-        if department_id:
-            qs = qs.filter(department_id=department_id)
-        return qs

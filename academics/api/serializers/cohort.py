@@ -1,114 +1,64 @@
 from django.db import transaction
 from rest_framework import serializers
-from academics.models import Department, Discipline, Term, Course, Room, StudyGroup, CourseClass
+from academics.models import Discipline, Term, Course, StudyGroup, CourseClass
 from users.models import TeacherProfile
+from .discipline import DisciplineSerializer
+from .term import TermSerializer
+from .study_group import StudyGroupSerializer, StudyGroupInputSerializer
+
 
 class TeacherFilterSerializer(serializers.Serializer):
     department_id = serializers.IntegerField(required=False)
 
-class DepartmentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = Department
-        fields = ["id", "name", "code", "created_at", "updated_at"]
 
-
-class DisciplineSerializer(serializers.ModelSerializer):
-    department = DepartmentSerializer(read_only=True)
-
-    class Meta:
-        model  = Discipline
-        fields = ["id", "name", "code", "department", "program_type", "created_at", "updated_at"]
-
-
-class TermSerializer(serializers.ModelSerializer):
-    class Meta:
-        model            = Term
-        fields           = ["id", "name", "start_date", "end_date", "is_active", "created_at", "updated_at"]
-        read_only_fields = ["is_active"]
-
-
-class CourseSerializer(serializers.ModelSerializer):
-    department = DepartmentSerializer(read_only=True)
-    
-    class Meta:
-        model  = Course
-        fields = ["id", "code", "title", "credits", "course_type", "department", "created_at", "updated_at"]
-
-
-class RoomSerializer(serializers.ModelSerializer):
-    department = DepartmentSerializer(read_only=True)
-
-    class Meta:
-        model  = Room
-        fields = ["id", "code", "name", "capacity", "room_type", "department", "is_active", "created_at", "updated_at"]
-
-
-class StudyGroupSerializer(serializers.ModelSerializer):
-    discipline = DisciplineSerializer(read_only=True)
-    term       = TermSerializer(read_only=True)
-
-    class Meta:
-        model  = StudyGroup
-        fields = ["id", "discipline", "term", "year_level", "number", "capacity", "created_at", "updated_at"]
-
-
-class CourseClassSerializer(serializers.ModelSerializer):
-    course = CourseSerializer(read_only=True)
-    group = StudyGroupSerializer(read_only=True)
-    
-    course_id = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), source='course', write_only=True, required=False
+class AddStudyGroupRequestSerializer(serializers.Serializer):
+    discipline_id = serializers.PrimaryKeyRelatedField(
+        queryset=Discipline.objects.all(),
+        error_messages={"does_not_exist": "The selected discipline does not exist."},
     )
-    group_id = serializers.PrimaryKeyRelatedField(
-        queryset=StudyGroup.objects.all(), source='group', write_only=True, required=False
+    term_id = serializers.PrimaryKeyRelatedField(
+        queryset=Term.objects.all(),
+        error_messages={"does_not_exist": "The selected term does not exist."},
     )
-    coordinator_id = serializers.PrimaryKeyRelatedField(
-        queryset=TeacherProfile.objects.all(),
-        source='coordinator',
-        allow_null=True,
-        required=False
-    )
-
-    class Meta:
-        model = CourseClass
-        fields = [
-            "id",
-            "course",
-            "course_id",
-            "group",
-            "group_id",
-            "coordinator_id",
-            "created_at",
-            "updated_at",
-        ]
-
-    
-class StudyGroupInputSerializer(serializers.Serializer):
+    year_level = serializers.IntegerField(min_value=1, max_value=4)
     number = serializers.IntegerField(min_value=1)
     capacity = serializers.IntegerField(min_value=1, default=50, required=False)
+
+
+class CohortIdentifierSerializer(serializers.Serializer):
+    discipline_id = serializers.PrimaryKeyRelatedField(
+        queryset=Discipline.objects.all(),
+        error_messages={"does_not_exist": "No discipline with this ID."},
+    )
+    term_id = serializers.PrimaryKeyRelatedField(
+        queryset=Term.objects.all(),
+        error_messages={"does_not_exist": "No term with this ID."},
+    )
+    year_level = serializers.IntegerField(min_value=1, max_value=4)
+
 
 class CohortBulkCreateSerializer(serializers.Serializer):
     discipline_id = serializers.PrimaryKeyRelatedField(queryset=Discipline.objects.all())
     term_id = serializers.PrimaryKeyRelatedField(queryset=Term.objects.all())
     year_level = serializers.IntegerField(min_value=1, max_value=4)
-    
+
     # 1. Array of validated dictionaries
     groups = StudyGroupInputSerializer(many=True, min_length=1)
-    
+
     # 2. Automatically validates all course IDs
     courses = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), 
-        many=True, 
+        queryset=Course.objects.all(),
+        many=True,
         allow_empty=True
     )
-    
+
     # 3. Automatically validates all teacher IDs in the map
     coordinators = serializers.DictField(
         child=serializers.PrimaryKeyRelatedField(queryset=TeacherProfile.objects.all(), allow_null=True),
         required=False,
         default=dict
     )
-
+    # 4. Custom validation for ensuring user didn't submit two group 1 for the same cohort, etc.
     def validate_groups(self, value):
         """Only array-level validation needed: ensure no duplicate group numbers."""
         numbers = [g["number"] for g in value]
@@ -164,6 +114,7 @@ class CohortBulkCreateSerializer(serializers.Serializer):
                 )
                 # Instead of searching for them in step 2 we map them here
                 # O(1) lookup instead of O(N)
+                # map for o(1) and list for returning the PKs to the client
                 group_map[number] = study_group
                 created_groups.append(study_group)
 
@@ -226,7 +177,7 @@ class CohortReadSerializer(serializers.Serializer):
     Virtual serializer for a Cohort — a logical grouping of StudyGroups sharing
     the same (discipline, term, year_level) triple.
 
-    Instances are plain dicts built by StudyGroupViewSet.cohorts() rather than
+    Instances are plain dicts built by CohortViewSet.cohorts() rather than
     ORM model instances.
     """
     id             = serializers.SerializerMethodField()
@@ -239,44 +190,6 @@ class CohortReadSerializer(serializers.Serializer):
 
     def get_id(self, obj) -> str:
         return f"{obj['discipline'].id}_{obj['term'].id}_{obj['year_level']}"
-
-class CourseFilterSerializer(serializers.Serializer):
-    """
-    Query-param contract for GET /academics/courses/.
-    discipline_id is the anchor — year_level and term_id only narrow
-    the results further if discipline_id is present; without it they're ignored,
-    same as before.
-    """
-    discipline_id = serializers.IntegerField(required=False)
-    year_level = serializers.IntegerField(required=False, min_value=1, max_value=4)
-    term_id = serializers.IntegerField(required=False)
-
-
-
-class AddStudyGroupRequestSerializer(serializers.Serializer):
-    discipline_id = serializers.PrimaryKeyRelatedField(
-        queryset=Discipline.objects.all(),
-        error_messages={"does_not_exist": "The selected discipline does not exist."},
-    )
-    term_id = serializers.PrimaryKeyRelatedField(
-        queryset=Term.objects.all(),
-        error_messages={"does_not_exist": "The selected term does not exist."},
-    )
-    year_level = serializers.IntegerField(min_value=1, max_value=4)
-    number = serializers.IntegerField(min_value=1)
-    capacity = serializers.IntegerField(min_value=1, default=50, required=False)
-
-
-class CohortIdentifierSerializer(serializers.Serializer):
-    discipline_id = serializers.PrimaryKeyRelatedField(
-        queryset=Discipline.objects.all(),
-        error_messages={"does_not_exist": "No discipline with this ID."},
-    )
-    term_id = serializers.PrimaryKeyRelatedField(
-        queryset=Term.objects.all(),
-        error_messages={"does_not_exist": "No term with this ID."},
-    )
-    year_level = serializers.IntegerField(min_value=1, max_value=4)
 
 
 class ScheduleCohortRequestSerializer(serializers.Serializer):
@@ -300,9 +213,3 @@ class ScheduleCohortResponseSerializer(serializers.Serializer):
     course_classes_scheduled = serializers.IntegerField()
     solve_time_seconds = serializers.FloatField()
     dry_run = serializers.BooleanField()
-
-
-class StudyGroupCapacitySerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    capacity = serializers.IntegerField()
-    remaining = serializers.IntegerField()

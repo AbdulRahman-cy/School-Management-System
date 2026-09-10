@@ -318,7 +318,7 @@ async function fetchCohorts(status: string = "active", disciplineId?: number | n
   if (disciplineId) {
     params.discipline_id = disciplineId;
   }
-  const { data } = await apiClient.get<Cohort[]>("/academics/groups/cohorts/", { params });
+  const { data } = await apiClient.get<Cohort[]>("/academics/cohorts/cohorts/", { params });
   return data;
 }
 
@@ -339,7 +339,7 @@ async function fetchBlueprintCourses(disciplineId: number, yearLevel: number, te
 }
 
 async function createCohort(payload: CohortBulkCreatePayload): Promise<unknown> {
-  const { data } = await apiClient.post("/academics/groups/bulk-cohort/", payload);
+  const { data } = await apiClient.post("/academics/cohorts/bulk-cohort/", payload);
   return data;
 }
 
@@ -351,7 +351,7 @@ export interface DeleteCohortPayload {
 
 async function deleteCohort(payload: DeleteCohortPayload): Promise<void> {
   try {
-    await apiClient.delete("/academics/groups/cohorts/", { params: payload });
+    await apiClient.delete("/academics/cohorts/cohorts/", { params: payload });
   } catch (err: unknown) {
     // 404 means the cohort is already gone — treat as success
     if ((err as { response?: { status?: number } })?.response?.status === 404) return;
@@ -377,7 +377,7 @@ export interface ScheduleCohortResult {
 }
 
 async function scheduleCohort(payload: ScheduleCohortPayload): Promise<ScheduleCohortResult> {
-  const { data } = await apiClient.post<ScheduleCohortResult>("/academics/groups/schedule-cohort/", payload);
+  const { data } = await apiClient.post<ScheduleCohortResult>("/academics/cohorts/schedule-cohort/", payload);
   return data;
 }
 
@@ -441,7 +441,7 @@ export interface AddStudyGroupPayload {
 }
 
 async function addStudyGroup(payload: AddStudyGroupPayload): Promise<unknown> {
-  const { data } = await apiClient.post("/academics/groups/add-group/", payload);
+  const { data } = await apiClient.post("/academics/cohorts/add-group/", payload);
   return data;
 }
 
@@ -659,7 +659,7 @@ export function useAddStudyGroup() {
 // ─── Enrollment (student self-service) fetchers & hooks ────────────────────────
 
 async function fetchAvailableGroups(): Promise<AvailableGroupsResponse> {
-  const { data } = await apiClient.get<AvailableGroupsResponse>("/records/enrollments/available-groups/");
+  const { data } = await apiClient.get<AvailableGroupsResponse>("/records/self-service/available-groups/");
   return data;
 }
 
@@ -669,7 +669,7 @@ async function fetchGroupCapacity(groupId: number): Promise<StudyGroupCapacity> 
 }
 
 async function enroll(payload: EnrollRequest): Promise<unknown> {
-  const { data } = await apiClient.post("/records/enrollments/enroll/", payload);
+  const { data } = await apiClient.post("/records/self-service/enroll/", payload);
   return data;
 }
 

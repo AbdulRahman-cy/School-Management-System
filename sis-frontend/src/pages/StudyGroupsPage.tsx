@@ -802,25 +802,20 @@ function CohortDetailModal({ compositeId, termFilter, selectedDiscipline, onClos
       return;
     }
 
-    let remaining = classIds.length;
-    let hadError = false;
+    const deletions = classIds.map(
+      id => new Promise<void>((resolve, reject) =>
+        runDeleteClass(id, { onSuccess: () => resolve(), onError: reject })
+      )
+    );
 
-    classIds.forEach(id => {
-      runDeleteClass(id, {
-        onSuccess: () => {
-          remaining--;
-          if (remaining === 0 && !hadError) {
-            setConfirmDelCourse(null);
-            onToast(`${code} removed`, "success");
-          }
-        },
-        onError: () => {
-          hadError = true;
-          remaining--;
-          if (remaining === 0) onToast(`Failed to remove some ${code} classes`, "error");
-        },
+    Promise.all(deletions)
+      .then(() => {
+        setConfirmDelCourse(null);
+        onToast(`${code} removed`, "success");
+      })
+      .catch(() => {
+        onToast(`Failed to remove some ${code} classes`, "error");
       });
-    });
   }
 
   return (

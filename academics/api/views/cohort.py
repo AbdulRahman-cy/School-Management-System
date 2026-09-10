@@ -1,89 +1,30 @@
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from users.api.permissions import IsAdminOrReadOnly
-from academics.models import Department, Discipline, StudyGroup, Term, Course, Room, CourseClass
-from .serializers import (
-    CourseSerializer,
-    DepartmentSerializer,
-    DisciplineSerializer,
-    TermSerializer,
-    RoomSerializer,
-    StudyGroupSerializer,
-    CourseClassSerializer,
+from academics.models import StudyGroup, CourseClass
+from academics.api.serializers import (
     CohortBulkCreateSerializer,
     CohortReadSerializer,
-    CourseFilterSerializer,
-    AddStudyGroupRequestSerializer,
     CohortIdentifierSerializer,
-    StudyGroupCapacitySerializer,   
+    AddStudyGroupRequestSerializer,
+    ScheduleCohortRequestSerializer,
+    ScheduleCohortResponseSerializer,
 )
-from django.db.models import Q
-from django.shortcuts import get_object_or_404
-from django.db import IntegrityError
+from users.api.permissions import IsAdminOrReadOnly
 from scheduling.services.cohort_scheduler import (
     CohortSchedulerService, SchedulingError, InfeasibleScheduleError,
 )
-from .serializers import ScheduleCohortRequestSerializer, ScheduleCohortResponseSerializer
 from scheduling.models import Session
 
 
-class DepartmentViewSet(viewsets.ModelViewSet):
+class CohortViewSet(viewsets.GenericViewSet):
+    """
+    Handles all cohort-level operations (listing, creation, scheduling,
+    adding study groups, and deletion). Cohorts are virtual entities
+    represented by (discipline, term, year_level) triples.
+    """
     permission_classes = [IsAdminOrReadOnly]
-    queryset = Department.objects.all()
-    serializer_class = DepartmentSerializer
-
-
-class DisciplineViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminOrReadOnly]
-    queryset = Discipline.objects.all()
-    serializer_class = DisciplineSerializer
-
-
-class TermViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminOrReadOnly]
-    queryset = Term.objects.all()
-    serializer_class = TermSerializer
-
-
-class CourseViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminOrReadOnly]
-    queryset = Course.objects.all()
-    serializer_class = CourseSerializer
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-
-        filters = CourseFilterSerializer(data=self.request.query_params)
-        filters.is_valid(raise_exception=True)
-        discipline_id = filters.validated_data.get("discipline_id")
-        year_level = filters.validated_data.get("year_level")
-        term_id = filters.validated_data.get("term_id")
-
-        if not discipline_id:
-            return qs
-
-        blueprint_match = Q(blueprints__discipline_id=discipline_id)
-        if year_level:
-            blueprint_match &= Q(blueprints__year_level=year_level)
-        if term_id:
-            term = get_object_or_404(Term, pk=term_id)
-            blueprint_match &= Q(blueprints__season=term.season)
-
-        return qs.filter(blueprint_match).distinct()
-
-class RoomViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminOrReadOnly]
-    queryset = Room.objects.all()
-    serializer_class = RoomSerializer
-
-
-class StudyGroupViewSet(viewsets.ModelViewSet):
-    # For the normal 5 http methods (list, retrieve, create, update, destroy) on StudyGroup url like /api/academics/groups/
-    permission_classes = [IsAdminOrReadOnly]
-    queryset = StudyGroup.objects.all()
-    serializer_class = StudyGroupSerializer
 
     @action(detail=False, methods=["get", "delete"], url_path="cohorts")
     def cohorts(self, request):
@@ -92,7 +33,6 @@ class StudyGroupViewSet(viewsets.ModelViewSet):
         return self._list_cohorts(request)
 
     def _list_cohorts(self, request):
-        # everything that used to be directly inside `cohorts()` — unchanged
         qs = (
             StudyGroup.objects
             .select_related("discipline", "discipline__department", "term")
@@ -134,7 +74,6 @@ class StudyGroupViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def _delete_cohort(self, request):
-        # everything that used to be directly inside `delete_cohort()` — unchanged
         serializer = CohortIdentifierSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
         discipline = serializer.validated_data["discipline_id"]
@@ -163,8 +102,6 @@ class StudyGroupViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED
         )
-
-
 
     @action(detail=False, methods=["post"], url_path="add-group")
     def add_study_group_to_cohort(self, request):
@@ -234,33 +171,3 @@ class StudyGroupViewSet(viewsets.ModelViewSet):
         }
         code = status.HTTP_200_OK if result.dry_run else status.HTTP_201_CREATED
         return Response(ScheduleCohortResponseSerializer(payload).data, status=code)
-
-    @action(detail=True, methods=["get"], url_path="capacity")
-    def capacity(self, request, pk=None):
-        from records.models import Enrollment 
-                                                 
-        study_group = self.get_object()
-        taken = (
-            Enrollment.objects
-            .filter(course_class__group=study_group, status=Enrollment.EnrollmentStatus.ENROLLED)
-            .values("student")
-            .distinct()
-            .count()
-        )
-        data = {
-            "id": study_group.id,
-            "capacity": study_group.capacity,
-            "remaining": max(study_group.capacity - taken, 0),
-        }
-        return Response(StudyGroupCapacitySerializer(data).data)
-
-class CourseClassViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminOrReadOnly]
-    queryset = CourseClass.objects.all()
-    serializer_class = CourseClassSerializer
-
-
-
-
-
-
