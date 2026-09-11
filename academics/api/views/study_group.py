@@ -12,21 +12,3 @@ class StudyGroupViewSet(viewsets.ModelViewSet):
     queryset = StudyGroup.objects.all()
     serializer_class = StudyGroupSerializer
 
-    @action(detail=True, methods=["get"], url_path="capacity")
-    def capacity(self, request, pk=None):
-        from records.models import Enrollment
-
-        study_group = self.get_object()
-        taken = (
-            Enrollment.objects
-            .filter(course_class__group=study_group, status=Enrollment.EnrollmentStatus.ENROLLED)
-            .values("student")
-            .distinct()
-            .count()
-        )
-        data = {
-            "id": study_group.id,
-            "capacity": study_group.capacity,
-            "remaining": max(study_group.capacity - taken, 0),
-        }
-        return Response(StudyGroupCapacitySerializer(data).data)

@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { useAvailableGroups, useGroupCapacity, useEnroll, isGraduated } from "../api";
-import type { AvailableStudyGroup, AvailableCourseClass, SessionDetail } from "../api";
+import { useState, useMemo, useEffect, useCallback, memo } from "react";
+import { useAvailableGroups, useLiveCapacities, useEnroll, useUnenroll, isGraduated } from "../api";
+import type { AvailableStudyGroup, AvailableCourseClass, SessionDetail, LiveCapacityEntry, LiveCapacitiesResponse } from "../api";
 import { getCourseColorTheme } from "../courseColors";
 
-// ─── CourseCodePill (local copy to avoid cross-file import) ──────────────────
+// ─── CourseCodePill ─────────────────────────────────────────────────────────
 
 function CourseCodePill({ code }: { code: string }) {
   const { bg, color } = getCourseColorTheme(code);
@@ -64,19 +64,103 @@ function EmptyState({ icon, heading, subtext }: { icon: string; heading: string;
   );
 }
 
-// ─── Banner (generic, unexpected errors only) ──────────────────────────────────
+// ─── Toast Notification System ───────────────────────────────────────────────
 
-function Banner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+export interface ToastMessage {
+  id: number;
+  message: string;
+  type: "error" | "success";
+}
+
+function ToastContainer({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismiss: (id: number) => void }) {
   return (
     <div style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-      padding: "12px 16px", borderRadius: 12, background: "#fee2e2", border: "1px solid #fca5a5",
-      color: "#b91c1c", fontSize: 12.5, fontWeight: 600,
+      position: "fixed", top: 24, right: 24, zIndex: 9999,
+      display: "flex", flexDirection: "column", gap: 10, maxWidth: 420, width: "100%", pointerEvents: "none",
     }}>
-      <span>⚠ {message}</span>
-      <button onClick={onDismiss} style={{ border: "none", background: "transparent", color: "#b91c1c", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>✕</button>
+      {toasts.map(toast => (
+        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
+      ))}
     </div>
   );
+}
+
+function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: number) => void }) {
+  useEffect(() => {
+    const timer = setTimeout(() => onDismiss(toast.id), 5000);
+    return () => clearTimeout(timer);
+  }, [toast.id, onDismiss]);
+
+  const isError = toast.type === "error";
+
+  return (
+    <div style={{
+      pointerEvents: "auto",
+      display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12,
+      padding: "14px 18px", borderRadius: 12,
+      background: isError ? "#fff1f2" : "#f0fdf4",
+      border: `1.5px solid ${isError ? "#fecdd3" : "#bbf7d0"}`,
+      color: isError ? "#9f1239" : "#166534",
+      boxShadow: "0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)",
+      fontSize: 12.5, fontWeight: 600, lineHeight: 1.4,
+      animation: "slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <span style={{ fontSize: 15, flexShrink: 0 }}>{isError ? "⚠️" : "✓"}</span>
+        <span>{toast.message}</span>
+      </div>
+      <button
+        onClick={() => onDismiss(toast.id)}
+        style={{
+          border: "none", background: "transparent",
+          color: isError ? "#9f1239" : "#166534",
+          cursor: "pointer", fontSize: 14, fontWeight: 700, padding: 0, marginLeft: 4, flexShrink: 0,
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// ─── Enroll & Unenroll error parsing ─────────────────────────────────────────
+
+function parseEnrollError(err: unknown): string {
+  const status = (err as { response?: { status?: number } })?.response?.status;
+  const data = (err as { response?: { data?: unknown } })?.response?.data;
+
+  if (status === 409) {
+    if (data && typeof data === "object" && "detail" in data && typeof (data as { detail?: string }).detail === "string") {
+      return (data as { detail: string }).detail;
+    }
+    return "Schedule conflict or class/group is already full.";
+  }
+
+  if (status === 400 && data) {
+    if (typeof data === "string") return data;
+    if (typeof data === "object") {
+      if ("detail" in data && typeof (data as { detail?: string }).detail === "string") {
+        return (data as { detail: string }).detail;
+      }
+      const messages: string[] = [];
+      for (const key of Object.keys(data)) {
+        const val = (data as Record<string, unknown>)[key];
+        if (Array.isArray(val)) {
+          messages.push(...val.map(String));
+        } else if (typeof val === "string") {
+          messages.push(val);
+        }
+      }
+      if (messages.length > 0) return messages.join(" ");
+    }
+    return "Operation validation failed.";
+  }
+
+  if (data && typeof data === "object" && "detail" in data && typeof (data as { detail?: string }).detail === "string") {
+    return (data as { detail: string }).detail;
+  }
+
+  return "Something went wrong. Please try again.";
 }
 
 // ─── Session row ──────────────────────────────────────────────────────────────
@@ -100,53 +184,6 @@ function SessionRow({ label, session, isLast }: { label: string; session: Sessio
   );
 }
 
-// ─── Course class card ─────────────────────────────────────────────────────────
-
-function CourseClassCard({ cc }: { cc: AvailableCourseClass }) {
-  return (
-    <div style={{ background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 12, padding: "13px 15px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, marginBottom: cc.coordinator_name ? 3 : 8 }}>
-        <CourseCodePill code={cc.course_code} />
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1e1b4b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cc.course_title}</span>
-      </div>
-      {cc.coordinator_name && (
-        <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 8 }}>{cc.coordinator_name}</div>
-      )}
-      <div>
-        <SessionRow label="Lecture" session={cc.lecture} isLast={false} />
-        <SessionRow label="Tutorial" session={cc.tutorial} isLast={false} />
-        <SessionRow label="Lab" session={cc.lab} isLast={true} />
-      </div>
-    </div>
-  );
-}
-
-// ─── Enroll error parsing ──────────────────────────────────────────────────────
-
-type EnrollErrorKind = "conflict" | "validation" | "unexpected";
-
-function parseEnrollError(err: unknown): { kind: EnrollErrorKind; message: string } {
-  const status = (err as { response?: { status?: number } })?.response?.status;
-  const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
-
-  if (status === 409) {
-    return { kind: "conflict", message: (data?.detail as string) ?? "This group just filled up." };
-  }
-  if (status === 400) {
-    if (typeof data?.detail === "string") {
-      return { kind: "validation", message: data.detail };
-    }
-    if (data && typeof data === "object") {
-      const firstKey = Object.keys(data)[0];
-      const value = firstKey ? data[firstKey] : undefined;
-      const message = Array.isArray(value) ? String(value[0]) : String(value ?? "Enrollment failed.");
-      return { kind: "validation", message };
-    }
-    return { kind: "validation", message: "Enrollment failed." };
-  }
-  return { kind: "unexpected", message: (data?.detail as string) ?? "Something went wrong. Please try again." };
-}
-
 // ─── Capacity badge ─────────────────────────────────────────────────────────────
 
 function CapacityBadge({ remaining, capacity, isFull }: { remaining: number; capacity: number; isFull: boolean }) {
@@ -163,40 +200,223 @@ function CapacityBadge({ remaining, capacity, isFull }: { remaining: number; cap
   );
 }
 
+// ─── Live-capacity change detection ──────────────────────────────────────────
+// useLiveCapacities polls every 5s and returns a freshly-parsed response object
+// each time, so its reference changes even when every seat count inside it is
+// identical to what we already had. React.memo's default shallow comparison
+// checks prop *identity*, so passing that object straight down would re-render
+// every card on every poll tick regardless of whether that card's own numbers
+// moved. These comparators check the values that actually matter instead, so a
+// card only re-renders when ITS OWN capacity changed.
+
+function liveCapacityEqual(a: LiveCapacityEntry | undefined, b: LiveCapacityEntry | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.capacity === b.capacity && a.remaining === b.remaining;
+}
+
+function groupLiveDataEqual(
+  group: AvailableStudyGroup,
+  prev: LiveCapacitiesResponse | undefined,
+  next: LiveCapacitiesResponse | undefined,
+): boolean {
+  if (prev === next) return true;
+  return group.course_classes.every(cc => liveCapacityEqual(prev?.[String(cc.id)], next?.[String(cc.id)]));
+}
+
+// ─── Course class card ─────────────────────────────────────────────────────────
+
+function CourseClassCardImpl({
+  cc,
+  liveCapacity,
+  isScheduled,
+  onShowToast,
+}: {
+  cc: AvailableCourseClass;
+  liveCapacity: LiveCapacityEntry | undefined;
+  isScheduled: boolean;
+  onShowToast: (msg: string, type: "error" | "success") => void;
+}) {
+  const isFull = isScheduled && liveCapacity !== undefined && liveCapacity.remaining === 0;
+
+  const { mutate: runClassEnroll, isPending: isEnrolling } = useEnroll();
+  const { mutate: runClassUnenroll, isPending: isUnenrolling } = useUnenroll();
+
+  function handleClassEnroll() {
+    runClassEnroll(
+      { course_class_id: cc.id },
+      {
+        onSuccess: () => {
+          onShowToast(`Successfully enrolled in ${cc.course_code}!`, "success");
+        },
+        onError: (err: unknown) => {
+          const errorMessage = parseEnrollError(err);
+          onShowToast(errorMessage, "error");
+        },
+      }
+    );
+  }
+
+  function handleClassUnenroll() {
+    runClassUnenroll(
+      { course_class_id: cc.id },
+      {
+        onSuccess: () => {
+          onShowToast(`Successfully dropped ${cc.course_code}.`, "success");
+        },
+        onError: (err: unknown) => {
+          const errorMessage = parseEnrollError(err);
+          onShowToast(errorMessage, "error");
+        },
+      }
+    );
+  }
+
+  return (
+    <div style={{ background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 12, padding: "13px 15px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0, marginBottom: cc.coordinator_name ? 3 : 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <CourseCodePill code={cc.course_code} />
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1e1b4b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cc.course_title}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {isScheduled && (
+            liveCapacity
+              ? <CapacityBadge remaining={liveCapacity.remaining} capacity={liveCapacity.capacity} isFull={isFull} />
+              : <span style={{ fontSize: 10.5, fontWeight: 700, padding: "3px 10px", borderRadius: 99, background: "#f1f5f9", color: "#94a3b8", border: "1px solid #e2e8f0" }}>—</span>
+          )}
+          {cc.is_enrolled ? (
+            <>
+              <span style={{
+                fontSize: 10.5, fontWeight: 700, padding: "3px 10px", borderRadius: 99,
+                background: "#dcfce7", color: "#15803d", border: "1px solid #bbf7d0", whiteSpace: "nowrap",
+              }}>
+                ✔ Enrolled
+              </span>
+              <button
+                onClick={handleClassUnenroll}
+                disabled={isUnenrolling}
+                title={`Drop ${cc.course_code}`}
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  padding: "3px 10px",
+                  borderRadius: 99,
+                  border: "1px solid #fca5a5",
+                  background: isUnenrolling ? "#fef2f2" : "#fef2f2",
+                  color: isUnenrolling ? "#991b1b" : "#b91c1c",
+                  cursor: isUnenrolling ? "not-allowed" : "pointer",
+                  transition: "all 0.15s ease",
+                  whiteSpace: "nowrap",
+                  fontFamily: "'Sora',sans-serif",
+                }}
+              >
+                {isUnenrolling ? "Dropping…" : "Drop Class"}
+              </button>
+            </>
+          ) : isScheduled ? (
+            <button
+              onClick={handleClassEnroll}
+              disabled={isEnrolling || isFull}
+              title={isFull ? "Class is full" : `Enroll in ${cc.course_code}`}
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                padding: "3px 10px",
+                borderRadius: 99,
+                border: "1px solid #7c3aed",
+                background: isEnrolling ? "#ede9fe" : isFull ? "#f1f5f9" : "#7c3aed",
+                color: isEnrolling ? "#6d28d9" : isFull ? "#94a3b8" : "#fff",
+                cursor: isEnrolling || isFull ? "not-allowed" : "pointer",
+                transition: "all 0.15s ease",
+                whiteSpace: "nowrap",
+                fontFamily: "'Sora',sans-serif",
+              }}
+            >
+              {isEnrolling ? "Enrolling…" : "+ Add Class"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {cc.coordinator_name && (
+        <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 8 }}>{cc.coordinator_name}</div>
+      )}
+      <div>
+        <SessionRow label="Lecture"  session={cc.lecture}   isLast={false} />
+        <SessionRow label="Tutorial" session={cc.tutorial}  isLast={false} />
+        <SessionRow label="Lab"      session={cc.lab}       isLast={true}  />
+      </div>
+    </div>
+  );
+}
+
+const CourseClassCard = memo(
+  CourseClassCardImpl,
+  (prev, next) =>
+    prev.cc === next.cc &&
+    prev.isScheduled === next.isScheduled &&
+    prev.onShowToast === next.onShowToast &&
+    liveCapacityEqual(prev.liveCapacity, next.liveCapacity),
+);
+
 // ─── Study group card ───────────────────────────────────────────────────────────
 
-function StudyGroupCard({ group, onGenericError }: { group: AvailableStudyGroup; onGenericError: (msg: string) => void }) {
-  const { data: capacityData } = useGroupCapacity(group.id, group.is_scheduled);
-  const remaining = capacityData?.remaining ?? group.remaining;
-  const capacity = capacityData?.capacity ?? group.capacity;
-  const isFull = group.is_scheduled && remaining === 0 && !group.is_member;
-
-  const { mutate: runEnroll, isPending } = useEnroll();
-  const [cardError, setCardError] = useState<string | null>(null);
-
-  function handleEnroll() {
-    setCardError(null);
-    runEnroll({ study_group_id: group.id }, {
-      onSuccess: () => setCardError(null),
-      onError: (err: unknown) => {
-        const parsed = parseEnrollError(err);
-        if (parsed.kind === "unexpected") {
-          console.error("[useEnroll] error:", err);
-          onGenericError(parsed.message);
-        } else {
-          setCardError(parsed.message);
-        }
-      },
+function StudyGroupCardImpl({
+  group,
+  liveData,
+  onShowToast,
+}: {
+  group: AvailableStudyGroup;
+  liveData: LiveCapacitiesResponse | undefined;
+  onShowToast: (msg: string, type: "error" | "success") => void;
+}) {
+  const isFull =
+    group.is_scheduled &&
+    !group.is_member &&
+    group.course_classes.length > 0 &&
+    group.course_classes.every(cc => {
+      const live = liveData?.[String(cc.id)];
+      return live !== undefined && live.remaining === 0;
     });
+
+  const { mutate: runGroupEnroll, isPending: isEnrolling } = useEnroll();
+  const { mutate: runGroupUnenroll, isPending: isUnenrolling } = useUnenroll();
+
+  function handleGroupEnroll() {
+    runGroupEnroll(
+      { study_group_id: group.id },
+      {
+        onSuccess: () => {
+          onShowToast(`Successfully enrolled in Group ${group.number}!`, "success");
+        },
+        onError: (err: unknown) => {
+          const errorMessage = parseEnrollError(err);
+          onShowToast(errorMessage, "error");
+        },
+      }
+    );
+  }
+
+  function handleGroupUnenroll() {
+    runGroupUnenroll(
+      { study_group_id: group.id },
+      {
+        onSuccess: () => {
+          onShowToast(`Successfully dropped Group ${group.number}!`, "success");
+        },
+        onError: (err: unknown) => {
+          const errorMessage = parseEnrollError(err);
+          onShowToast(errorMessage, "error");
+        },
+      }
+    );
   }
 
   return (
     <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #ede9fe", overflow: "hidden", boxShadow: "0 2px 12px rgba(124,58,237,.05)", display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "14px 20px", background: "#faf5ff", borderBottom: "1px solid #ede9fe", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ fontSize: 14.5, fontWeight: 800, color: "#1e1b4b", letterSpacing: "-.2px" }}>Group {group.number}</span>
-        {group.is_scheduled ? (
-          <CapacityBadge remaining={remaining} capacity={capacity} isFull={isFull} />
-        ) : (
+        {!group.is_scheduled && (
           <span style={{
             fontSize: 10.5, fontWeight: 700, padding: "3px 11px", borderRadius: 99,
             background: "#f1f5f9", color: "#64748b", border: "1px solid #e2e8f0", whiteSpace: "nowrap",
@@ -205,7 +425,15 @@ function StudyGroupCard({ group, onGenericError }: { group: AvailableStudyGroup;
       </div>
 
       <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
-        {group.course_classes.map(cc => <CourseClassCard key={cc.id} cc={cc} />)}
+        {group.course_classes.map(cc => (
+          <CourseClassCard
+            key={cc.id}
+            cc={cc}
+            liveCapacity={liveData?.[String(cc.id)]}
+            isScheduled={group.is_scheduled}
+            onShowToast={onShowToast}
+          />
+        ))}
       </div>
 
       <div style={{ padding: "0 18px 18px" }}>
@@ -216,11 +444,18 @@ function StudyGroupCard({ group, onGenericError }: { group: AvailableStudyGroup;
             fontFamily: "'Sora',sans-serif", cursor: "not-allowed",
           }}>Not yet scheduled</button>
         ) : group.is_member ? (
-          <button disabled style={{
-            width: "100%", padding: "10px 0", borderRadius: 10, border: "1.5px solid #a7f3d0",
-            background: "#f0fdf4", color: "#065f46", fontSize: 12.5, fontWeight: 700,
-            fontFamily: "'Sora',sans-serif", cursor: "default",
-          }}>✓ Enrolled</button>
+          <button
+            onClick={handleGroupUnenroll}
+            disabled={isUnenrolling}
+            style={{
+              width: "100%", padding: "10px 0", borderRadius: 10, border: "1.5px solid #fca5a5",
+              background: "#fef2f2", color: "#b91c1c", fontSize: 12.5, fontWeight: 700,
+              fontFamily: "'Sora',sans-serif", cursor: isUnenrolling ? "not-allowed" : "pointer",
+              transition: "all 0.15s ease",
+            }}
+          >
+            {isUnenrolling ? "Dropping…" : "Drop Entire Group"}
+          </button>
         ) : isFull ? (
           <button disabled style={{
             width: "100%", padding: "10px 0", borderRadius: 10, border: "1.5px solid #fca5a5",
@@ -228,45 +463,67 @@ function StudyGroupCard({ group, onGenericError }: { group: AvailableStudyGroup;
             fontFamily: "'Sora',sans-serif", cursor: "not-allowed",
           }}>Full</button>
         ) : (
-          <button onClick={handleEnroll} disabled={isPending} style={{
+          <button onClick={handleGroupEnroll} disabled={isEnrolling} style={{
             width: "100%", padding: "10px 0", borderRadius: 10, border: "none",
-            background: isPending ? "#c4b5fd" : "linear-gradient(135deg,#7c3aed,#6d28d9)",
+            background: isEnrolling ? "#c4b5fd" : "linear-gradient(135deg,#7c3aed,#6d28d9)",
             color: "#fff", fontSize: 12.5, fontWeight: 700, fontFamily: "'Sora',sans-serif",
-            cursor: isPending ? "not-allowed" : "pointer",
-            boxShadow: isPending ? "none" : "0 4px 14px rgba(124,58,237,.3)",
-          }}>{isPending ? "Enrolling…" : "Enroll"}</button>
-        )}
-
-        {cardError && (
-          <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: "#fef3c7", border: "1px solid #fde68a", color: "#92400e", fontSize: 11.5, fontWeight: 600, lineHeight: 1.4 }}>
-            ⚠ {cardError}
-          </div>
+            cursor: isEnrolling ? "not-allowed" : "pointer",
+            boxShadow: isEnrolling ? "none" : "0 4px 14px rgba(124,58,237,.3)",
+          }}>{isEnrolling ? "Enrolling…" : "Enroll in Group"}</button>
         )}
       </div>
     </div>
   );
 }
 
+const StudyGroupCard = memo(
+  StudyGroupCardImpl,
+  (prev, next) =>
+    prev.group === next.group &&
+    prev.onShowToast === next.onShowToast &&
+    groupLiveDataEqual(next.group, prev.liveData, next.liveData),
+);
+
 // ─── Main component ─────────────────────────────────────────────────────────────
 
 export default function EnrollmentPage() {
   const { data, isLoading, error } = useAvailableGroups();
-  const [genericError, setGenericError] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  // Stable identity: passed down through StudyGroupCard into every CourseClassCard,
+  // both wrapped in React.memo. Without useCallback, addToast would be a new function
+  // on every EnrollmentPage render (e.g. whenever a toast is added or dismissed),
+  // which would fail those components' prop-equality checks and re-render the whole
+  // grid on every toast — exactly the cascade the memo boundaries exist to stop.
+  const addToast = useCallback((message: string, type: "error" | "success" = "error") => {
+    setToasts(prev => [...prev, { id: Date.now() + Math.random(), message, type }]);
+  }, []);
+
+  function dismissToast(id: number) {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }
+
+  // Extract ALL classIds across every visible study group into a single flat array
+  const allClassIds = useMemo(() => {
+    if (!data || isGraduated(data)) return [];
+    return data.flatMap(group => group.course_classes.map(cc => cc.id));
+  }, [data]);
+
+  // Single bulk live capacity poll for all course classes on the page
+  const { data: liveData } = useLiveCapacities(allClassIds);
 
   const status = (error as { response?: { status?: number } } | null)?.response?.status;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, fontFamily: "'Sora',sans-serif" }}>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       <div className="ani0">
         <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px" }}>Enrollment</h2>
         <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>
-          {Array.isArray(data) ? `${data.length} study group${data.length !== 1 ? "s" : ""} available` : "Join a study group for the active term"}
+          {Array.isArray(data) ? `${data.length} study group${data.length !== 1 ? "s" : ""} available` : "Join a study group or course class for the active term"}
         </p>
       </div>
-
-      {genericError && (
-        <Banner message={genericError} onDismiss={() => setGenericError(null)} />
-      )}
 
       {isLoading && (
         <div className="ani1" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16 }}>
@@ -293,7 +550,7 @@ export default function EnrollmentPage() {
       {!isLoading && !error && data && !isGraduated(data) && data.length > 0 && (
         <div className="ani1" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16 }}>
           {data.map(group => (
-            <StudyGroupCard key={group.id} group={group} onGenericError={setGenericError} />
+            <StudyGroupCard key={group.id} group={group} liveData={liveData} onShowToast={addToast} />
           ))}
         </div>
       )}

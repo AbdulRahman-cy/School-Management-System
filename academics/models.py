@@ -159,34 +159,31 @@ class StudyGroup(TimestampedModel):
 # ─────────────────────────────────────────────────────────────
 
 class CourseClass(TimestampedModel):
-    course      = models.ForeignKey(
-        Course,
-        on_delete=models.CASCADE,
-        related_name="classes",
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="classes")
+    group = models.ForeignKey(StudyGroup, on_delete=models.CASCADE, related_name="course_classes")
+    coordinator = models.ForeignKey(
+        "users.TeacherProfile", on_delete=models.CASCADE, related_name="coordinated_classes",
+        null=True, blank=True
     )
     
-    group       = models.ForeignKey(
-        StudyGroup,
-        on_delete=models.CASCADE,
-        related_name="course_classes",
-    )
-    coordinator = models.ForeignKey(
-        "users.TeacherProfile",
-        on_delete=models.CASCADE,
-        related_name="coordinated_classes",
-        null=True,   # Tells the database to allow empty values
-        blank=True,  # Tells Django forms/serializers to allow empty values
+    capacity = models.PositiveIntegerField(
+        help_text="Inherits from StudyGroup on creation, but can be overridden later."
     )
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(
-                fields=["course", "group"],
-                name="unique_course_group",
-            )
+            models.UniqueConstraint(fields=["course", "group"], name="unique_course_group")
         ]
 
-    
+    def save(self, *args, **kwargs):
+        # 2. Auto-inherit capacity ONLY upon initial creation if not explicitly provided
+        if not self.pk and not self.capacity:
+            if self.group_id:
+                self.capacity = self.group.capacity
+            else:
+                self.capacity = 50 # Safe fallback
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.course.code} / {self.group}"
 

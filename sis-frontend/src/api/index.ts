@@ -132,7 +132,7 @@ export const queryKeys = {
   courses:        ()                                 => ["courses"] as const,
   teachers:       (departmentId?: number)            => ["teachers", { departmentId }] as const,
   availableGroups: ()                                => ["available-groups"] as const,
-  groupCapacity:   (groupId: number)                 => ["group-capacity", groupId] as const,
+  liveCapacities:  (classIds: number[])               => ["live-capacities", classIds] as const,
 };
  
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
@@ -463,16 +463,23 @@ export interface AvailableCourseClass {
   lecture: SessionDetail | null;
   tutorial: SessionDetail | null;
   lab: SessionDetail | null;
+  is_enrolled?: boolean;
+  // capacity & remaining are NOT part of the initial load.
+  // Exclusively sourced from useLiveCapacities polling.
 }
 
 export interface AvailableStudyGroup {
   id: number;
   number: number;
-  capacity: number;
-  remaining: number;
   is_member: boolean;
   is_scheduled: boolean;
   course_classes: AvailableCourseClass[];
+}
+
+/** Single entry returned by the bulk live-capacities endpoint */
+export interface LiveCapacityEntry {
+  capacity: number;
+  remaining: number;
 }
 
 export type AvailableGroupsResponse =
@@ -483,15 +490,22 @@ export const isGraduated = (
   data: AvailableGroupsResponse
 ): data is { detail: string; graduated: true } => !Array.isArray(data);
 
-export interface StudyGroupCapacity {
-  id: number;
-  capacity: number;
-  remaining: number;
+/** Bulk response: CourseClass ID (as string key) → LiveCapacityEntry */
+export type LiveCapacitiesResponse = Record<string, LiveCapacityEntry>;
+
+export type EnrollRequest =
+  | { study_group_id: number; course_class_id?: never }
+  | { course_class_id: number; study_group_id?: never };
+
+/** POST /enroll/ response: created Enrollment rows, or a no-op notice if already enrolled in every requested class. */
+export type EnrollResult = Enrollment[] | { detail: string };
+
+/** POST /unenroll/ response. */
+export interface UnenrollResult {
+  detail: string;
+  deleted_count: number;
 }
 
-export interface EnrollRequest {
-  study_group_id: number;
-}
 
 // ─── Reference data hooks ─────────────────────────────────────────────────────
 
@@ -663,13 +677,21 @@ async function fetchAvailableGroups(): Promise<AvailableGroupsResponse> {
   return data;
 }
 
-async function fetchGroupCapacity(groupId: number): Promise<StudyGroupCapacity> {
-  const { data } = await apiClient.get<StudyGroupCapacity>(`/academics/groups/${groupId}/capacity/`);
+async function fetchLiveCapacities(classIds: number[]): Promise<LiveCapacitiesResponse> {
+  const { data } = await apiClient.get<LiveCapacitiesResponse>(
+    "/records/self-service/live-capacities/",
+    { params: { class_ids: classIds.join(",") } },
+  );
   return data;
 }
 
-async function enroll(payload: EnrollRequest): Promise<unknown> {
-  const { data } = await apiClient.post("/records/self-service/enroll/", payload);
+async function enroll(payload: EnrollRequest): Promise<EnrollResult> {
+  const { data } = await apiClient.post<EnrollResult>("/records/self-service/enroll/", payload);
+  return data;
+}
+
+async function unenroll(payload: EnrollRequest): Promise<UnenrollResult> {
+  const { data } = await apiClient.post<UnenrollResult>("/records/self-service/unenroll/", payload);
   return data;
 }
 
@@ -681,23 +703,48 @@ export function useAvailableGroups() {
   });
 }
 
-export function useGroupCapacity(groupId: number, enabled: boolean = true) {
+/**
+ * Polls the bulk live-capacities endpoint every 5 s.
+ * Pass the IDs of every CourseClass currently visible on screen.
+ * Returns a stable dictionary keyed by class ID (as a string).
+ */
+export function useLiveCapacities(classIds: number[]) {
   return useQuery({
-    queryKey: queryKeys.groupCapacity(groupId),
-    queryFn:  () => fetchGroupCapacity(groupId),
-    enabled,
-    refetchInterval: 5000,
-    staleTime: 0,
+    queryKey:        queryKeys.liveCapacities(classIds),
+    queryFn:         () => fetchLiveCapacities(classIds),
+    enabled:         classIds.length > 0,
+    refetchInterval: 5_000,
+    staleTime:       0,
   });
+}
+
+// Both mutations touch the same set of downstream caches: the enroll grid
+// itself, the bulk capacity poll, and — since a class was just added to or
+// dropped from the student's schedule — every "main schedule" query fed by
+// enrollment state (Dashboard's sessions list and enrollment summary).
+// Bare-prefix keys (["sessions"], ["enrollments"]) intentionally match every
+// student/term variant cached under them, the same pattern already used by
+// the cohort hooks above.
+function invalidateEnrollmentCaches(queryClient: ReturnType<typeof useQueryClient>): void {
+  queryClient.invalidateQueries({ queryKey: queryKeys.availableGroups() });
+  queryClient.invalidateQueries({ queryKey: ["live-capacities"] });
+  queryClient.invalidateQueries({ queryKey: ["sessions"] });
+  queryClient.invalidateQueries({ queryKey: ["enrollments"] });
 }
 
 export function useEnroll() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: enroll,
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.availableGroups() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.groupCapacity(variables.study_group_id) });
-    },
+    onSuccess: () => invalidateEnrollmentCaches(queryClient),
   });
-}
+}
+
+export function useUnenroll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: unenroll,
+    onSuccess: () => invalidateEnrollmentCaches(queryClient),
+  });
+}
+

@@ -55,12 +55,12 @@ def get_eligible_study_groups(student) -> list[dict]:
         .values_list("course_class_id", flat=True).distinct()
     )
 
-    is_member_of = set(
+    enrolled_class_ids = set(
         Enrollment.objects.filter(
             student=student,
             course_class__group_id__in=group_ids,
             status=Enrollment.EnrollmentStatus.ENROLLED,
-        ).values_list("course_class__group_id", flat=True)
+        ).values_list("course_class_id", flat=True)
     )
 
     # Same "distinct student, scoped to group" formula as EnrollmentService —
@@ -75,18 +75,22 @@ def get_eligible_study_groups(student) -> list[dict]:
         )
     }
 
+    def _group_is_member(grp_id: int) -> bool:
+        grp_classes = classes_by_group.get(grp_id, [])
+        return len(grp_classes) > 0 and all(cc.id in enrolled_class_ids for cc in grp_classes)
+
     return [
         {
             "id": group.id,
             "number": group.number,
             "capacity": group.capacity,
             "remaining": max(group.capacity - taken_by_group.get(group.id, 0), 0),
-            "is_member": group.id in is_member_of,
+            "is_member": _group_is_member(group.id),
             "is_scheduled": any(
                 cc.id in scheduled_class_ids for cc in classes_by_group.get(group.id, [])
             ),
             "course_classes": [
-                _serialize_course_class(cc, sessions_by_class.get(cc.id, {}))
+                _serialize_course_class(cc, sessions_by_class.get(cc.id, {}), cc.id in enrolled_class_ids)
                 for cc in classes_by_group.get(group.id, [])
             ],
         }
@@ -94,7 +98,7 @@ def get_eligible_study_groups(student) -> list[dict]:
     ]
 
 
-def _serialize_course_class(cc: CourseClass, sessions: dict) -> dict:
+def _serialize_course_class(cc: CourseClass, sessions: dict, is_enrolled: bool = False) -> dict:
     def _session(s):
         if s is None:
             return None
@@ -114,4 +118,5 @@ def _serialize_course_class(cc: CourseClass, sessions: dict) -> dict:
         "lecture": _session(sessions.get(Session.SessionType.LECTURE)),
         "tutorial": _session(sessions.get(Session.SessionType.TUTORIAL)),
         "lab": _session(sessions.get(Session.SessionType.LAB)),
-    }
+        "is_enrolled": is_enrolled,
+    }

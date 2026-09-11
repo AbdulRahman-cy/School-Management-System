@@ -16,6 +16,7 @@ router.register(r'assignments', AssignmentViewSet, basename='assignment')
 router.register(r'student-submissions', StudentSubmissionViewSet, basename='studentsubmission')
 router.register(r'self-service', StudentEnrollmentViewSet, basename='self-service')
 
+
 urlpatterns = [
     path('', include(router.urls)),
-]
+]
