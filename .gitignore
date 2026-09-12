@@ -79,3 +79,4 @@ pnpm-debug.log*
 
 repomix-output.xml
 auto_stress_test.py
+.claude/

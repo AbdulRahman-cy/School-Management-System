@@ -14,6 +14,7 @@ from academics.api.serializers import (
 from users.api.permissions import IsAdminOrReadOnly
 from scheduling.services.cohort_scheduler import (
     CohortSchedulerService, SchedulingError, InfeasibleScheduleError,
+    RescheduleConfirmationRequiredError,
 )
 from scheduling.models import Session
 
@@ -68,7 +69,19 @@ class CohortViewSet(viewsets.GenericViewSet):
 
         scheduled_class_ids = set(Session.objects.values_list("course_class_id", flat=True).distinct())
         for cohort in cohort_map.values():
-            cohort["is_scheduled"] = any(cc.id in scheduled_class_ids for cc in cohort["course_classes"])
+            classes = cohort["course_classes"]
+            scheduled_count = sum(1 for cc in classes if cc.id in scheduled_class_ids)
+            # "needs_reschedule" covers two distinct cases: a class was added/removed
+            # since the last run (partial coverage), or every class still has sessions
+            # but one was flagged dirty (its coordinator changed after being scheduled —
+            # see CourseClass.schedule_dirty). Both mean the existing sessions no longer
+            # reflect what should actually be scheduled.
+            if scheduled_count == 0:
+                cohort["schedule_status"] = "unscheduled"
+            elif scheduled_count < len(classes) or any(cc.schedule_dirty for cc in classes):
+                cohort["schedule_status"] = "needs_reschedule"
+            else:
+                cohort["schedule_status"] = "scheduled"
 
         serializer = CohortReadSerializer(list(cohort_map.values()), many=True)
         return Response(serializer.data)
@@ -124,8 +137,12 @@ class CohortViewSet(viewsets.GenericViewSet):
                     .values_list("course_id", flat=True)
                     .distinct()
                 )
+                # bulk_create() never calls CourseClass.save(), so the "inherit
+                # capacity from the group" default it normally applies has to be
+                # supplied explicitly here — otherwise capacity ships as NULL and
+                # violates the NOT NULL constraint.
                 CourseClass.objects.bulk_create([
-                    CourseClass(course_id=cid, group=study_group, coordinator=None)
+                    CourseClass(course_id=cid, group=study_group, coordinator=None, capacity=study_group.capacity)
                     for cid in course_ids
                 ])
         except IntegrityError as exc:
@@ -157,6 +174,19 @@ class CohortViewSet(viewsets.GenericViewSet):
 
         try:
             result = service.run(dry_run=data.get("dry_run", False))
+        except RescheduleConfirmationRequiredError as exc:
+            # Structured, not just a prose message: lets the frontend build its own
+            # copy and choose a confirmation tone instead of pattern-matching on
+            # "Pass force=true to proceed" inside a backend-authored string.
+            return Response(
+                {
+                    "detail": str(exc),
+                    "requires_confirmation": True,
+                    "stale_session_count": exc.stale_session_count,
+                    "affected_enrollment_count": exc.affected_enrollment_count,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         except InfeasibleScheduleError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         except SchedulingError as exc:

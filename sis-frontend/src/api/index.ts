@@ -86,6 +86,15 @@ export interface CohortTerm {
   is_active: boolean;
 }
 
+/**
+ * - "unscheduled": no class in the cohort has any sessions yet.
+ * - "needs_reschedule": either only some classes have sessions (one was added/
+ *   removed since the last run), or every class does but a coordinator was
+ *   reassigned on an already-scheduled class since then (see CourseClass.schedule_dirty).
+ * - "scheduled": every class has sessions and nothing's been flagged dirty.
+ */
+export type ScheduleStatus = "unscheduled" | "needs_reschedule" | "scheduled";
+
 export interface Cohort {
   /** Composite key: "{discipline.id}_{term.id}_{year_level}" */
   id: string;
@@ -94,7 +103,7 @@ export interface Cohort {
   year_level: number;
   groups: CohortGroup[];
   course_classes: CohortCourseClass[];
-  is_scheduled: boolean;
+  schedule_status: ScheduleStatus;
 }
 
 /**
@@ -374,6 +383,18 @@ export interface ScheduleCohortResult {
   course_classes_scheduled: number;
   solve_time_seconds: number;
   dry_run: boolean;
+}
+
+/**
+ * Body of the 409 returned when scheduling a cohort that already has sessions
+ * and `force` wasn't passed. `detail` is a dev-facing fallback string — prefer
+ * the counts for user-facing copy.
+ */
+export interface RescheduleConfirmationRequired {
+  detail: string;
+  requires_confirmation: true;
+  stale_session_count: number;
+  affected_enrollment_count: number;
 }
 
 async function scheduleCohort(payload: ScheduleCohortPayload): Promise<ScheduleCohortResult> {

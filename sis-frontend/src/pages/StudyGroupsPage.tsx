@@ -12,7 +12,7 @@ import {
 import type {
   Cohort as APICohort, CohortBulkCreatePayload,
   DisciplineOption, TermOption, CourseOption, TeacherOption,
-  ScheduleCohortResult,
+  ScheduleCohortResult, ScheduleStatus, RescheduleConfirmationRequired,
 } from "../api";
 
 
@@ -66,7 +66,7 @@ export interface UICohort {
   coordinators: CoordinatorMap;
   /** Maps "courseCode_groupLetter" → CourseClass DB PK, used for PATCH mutations */
   courseClassIds: CourseClassIdMap;
-  is_scheduled: boolean;
+  schedule_status: ScheduleStatus;
 }
 
 
@@ -149,7 +149,7 @@ function adaptCohort(c: APICohort): UICohort {
     courses: Array.from(courseMap.values()),
     coordinators,
     courseClassIds,
-    is_scheduled: c.is_scheduled,
+    schedule_status: c.schedule_status,
   };
 }
 
@@ -197,16 +197,39 @@ function Toast({ message, type, onDone }: { message: string; type: "success" | "
 
 // ─── ConfirmDialog ────────────────────────────────────────────────────────────
 
-function ConfirmDialog({ message, onConfirm, onCancel, confirmLabel = "Delete" }: { message: string; onConfirm: () => void; onCancel: () => void; confirmLabel?: string }) {
+const CONFIRM_DIALOG_TONES = {
+  // Destructive, irreversible (delete a cohort/group/course) — the original look.
+  danger:  { icon: "🗑", border: "#fee2e2", confirmBg: "linear-gradient(135deg,#ef4444,#dc2626)", confirmShadow: "rgba(239,68,68,0.28)" },
+  // Disruptive but not data loss (replacing a schedule) — amber instead of red,
+  // so it doesn't read as "delete" at a glance.
+  warning: { icon: "🔄", border: "#fde68a", confirmBg: "linear-gradient(135deg,#f59e0b,#d97706)", confirmShadow: "rgba(245,158,11,0.28)" },
+} as const;
+
+function ConfirmDialog({
+  message,
+  subtext = "This action cannot be undone.",
+  tone = "danger",
+  onConfirm,
+  onCancel,
+  confirmLabel = "Delete",
+}: {
+  message: string;
+  subtext?: string;
+  tone?: keyof typeof CONFIRM_DIALOG_TONES;
+  onConfirm: () => void;
+  onCancel: () => void;
+  confirmLabel?: string;
+}) {
+  const { icon, border, confirmBg, confirmShadow } = CONFIRM_DIALOG_TONES[tone];
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(15,10,30,0.45)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div style={{ background: "#fff", borderRadius: 16, padding: "24px 28px", maxWidth: 380, width: "100%", boxShadow: "0 24px 64px rgba(100,50,255,0.16)", border: "1px solid #fee2e2", animation: "fadeUp .2s ease both" }}>
-        <div style={{ fontSize: 22, marginBottom: 12 }}>🗑</div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "#1e1b4b", marginBottom: 6 }}>{message}</div>
-        <div style={{ fontSize: 11.5, color: "#94a3b8", marginBottom: 20 }}>This action cannot be undone.</div>
+    <div onClick={e => e.stopPropagation()} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(15,10,30,0.45)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: "24px 28px", maxWidth: 380, width: "100%", boxShadow: "0 24px 64px rgba(100,50,255,0.16)", border: `1px solid ${border}`, animation: "fadeUp .2s ease both" }}>
+        <div style={{ fontSize: 22, marginBottom: 12 }}>{icon}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#1e1b4b", marginBottom: 6, whiteSpace: "pre-line" }}>{message}</div>
+        <div style={{ fontSize: 11.5, color: "#94a3b8", marginBottom: 20 }}>{subtext}</div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button onClick={onCancel} style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: "1.5px solid #ede9fe", background: "#faf5ff", color: "#64748b", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "'Sora',sans-serif" }}>Cancel</button>
-          <button onClick={onConfirm} style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: "none", background: "linear-gradient(135deg,#ef4444,#dc2626)", color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Sora',sans-serif", boxShadow: "0 4px 14px rgba(239,68,68,0.28)" }}>{confirmLabel}</button>
+          <button onClick={e => { e.stopPropagation(); onCancel(); }} style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: "1.5px solid #ede9fe", background: "#faf5ff", color: "#64748b", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "'Sora',sans-serif" }}>Cancel</button>
+          <button onClick={e => { e.stopPropagation(); onConfirm(); }} style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: "none", background: confirmBg, color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "'Sora',sans-serif", boxShadow: `0 4px 14px ${confirmShadow}` }}>{confirmLabel}</button>
         </div>
       </div>
     </div>
@@ -471,7 +494,7 @@ function CohortCard({ cohort, onOpen, onToast }: {
 }) {
   const [hovered, setHovered] = useState(false);
   const [schedulerHovered, setSchedulerHovered] = useState(false);
-  const [rescheduleConfirm, setRescheduleConfirm] = useState<string | null>(null);
+  const [rescheduleConfirm, setRescheduleConfirm] = useState<RescheduleConfirmationRequired | null>(null);
   const colors = getDisciplineColors(cohort.discipline.code);
   const totalCap = cohort.groups.reduce((s, g) => s + g.capacity, 0);
 
@@ -490,12 +513,13 @@ function CohortCard({ cohort, onOpen, onToast }: {
         },
         onError: (err: unknown) => {
           const status = (err as { response?: { status?: number } })?.response?.status;
-          const detail =
-            (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-            ?? "Scheduling failed — please try again.";
-          if (detail.includes("Pass force=true to proceed")) {
-            // Cohort was already scheduled — show in-app confirm dialog instead of window.confirm
-            setRescheduleConfirm(detail);
+          const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
+          const detail = (typeof data?.detail === "string" ? data.detail : undefined) ?? "Scheduling failed — please try again.";
+
+          if (data?.requires_confirmation === true) {
+            // Cohort was already scheduled — show in-app confirm dialog instead of
+            // window.confirm, built from the structured counts rather than parsing detail.
+            setRescheduleConfirm(data as unknown as RescheduleConfirmationRequired);
             return; // expected branch — no toast, no console.error
           }
           if (status === 409) {
@@ -525,8 +549,16 @@ function CohortCard({ cohort, onOpen, onToast }: {
           {!cohort.term.is_active && (
             <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".5px", padding: "4px 11px", borderRadius: 99, background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", fontFamily: "'Sora',sans-serif", textTransform: "uppercase", flexShrink: 0 }}>Archived</span>
           )}
-          {cohort.is_scheduled && (
+          {cohort.schedule_status === "scheduled" && (
             <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".5px", padding: "4px 11px", borderRadius: 99, background: "#d1fae5", color: "#065f46", border: "1px solid #6ee7b7", fontFamily: "'Sora',sans-serif", textTransform: "uppercase", flexShrink: 0 }}>✓ Scheduled</span>
+          )}
+          {cohort.schedule_status === "needs_reschedule" && (
+            <span
+              title="A class or coordinator changed since this cohort was last scheduled — its sessions may no longer match."
+              style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".5px", padding: "4px 11px", borderRadius: 99, background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", fontFamily: "'Sora',sans-serif", textTransform: "uppercase", flexShrink: 0 }}
+            >
+              ⚠ Needs Rescheduling
+            </span>
           )}
         </div>
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".2px", padding: "4px 11px", borderRadius: 99, background: "rgba(255,255,255,0.92)", color: "#1e1b4b", border: `1px solid ${colors.border}`, fontFamily: "'Sora',sans-serif", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{cohort.discipline.name}</span>
@@ -583,7 +615,14 @@ function CohortCard({ cohort, onOpen, onToast }: {
 
       {rescheduleConfirm !== null && (
         <ConfirmDialog
-          message={`Re-schedule ${cohort.discipline.code} — Year ${cohort.year_level}?\n${rescheduleConfirm}`}
+          message={`Re-schedule ${cohort.discipline.code} — Year ${cohort.year_level}?`}
+          subtext={
+            rescheduleConfirm.affected_enrollment_count > 0
+              ? `This replaces ${rescheduleConfirm.stale_session_count} existing session(s). `
+                + `${rescheduleConfirm.affected_enrollment_count} student enrollment(s) reference them and will need to be re-checked.`
+              : `This replaces ${rescheduleConfirm.stale_session_count} existing session(s). No enrollments reference them.`
+          }
+          tone="warning"
           confirmLabel="Reschedule Anyway"
           onConfirm={() => { setRescheduleConfirm(null); doSchedule(true); }}
           onCancel={() => setRescheduleConfirm(null)}
@@ -614,8 +653,8 @@ function CohortDetailModal({ compositeId, termFilter, selectedDiscipline, onClos
   const { mutate: runDeleteGroup,         isPending: isDeletingGroup   } = useDeleteStudyGroup();
   const { mutate: runAddGroup,            isPending: isAddingGroup     } = useAddStudyGroup();
   const { mutateAsync: runCreateClassAsync, isPending: isCreatingClass } = useCreateCourseClass();
-  const { mutate: runUpdateClass,         isPending: isUpdatingClass   } = useUpdateCourseClass();
-  const { mutate: runDeleteClass,         isPending: isDeletingClass   } = useDeleteCourseClass();
+  const { mutateAsync: runUpdateClassAsync, isPending: isUpdatingClass } = useUpdateCourseClass();
+  const { mutateAsync: runDeleteClassAsync, isPending: isDeletingClass } = useDeleteCourseClass();
 
   const isAnyPending = isDeletingCohort || isUpdatingGroup || isDeletingGroup || isAddingGroup || isCreatingClass || isUpdatingClass || isDeletingClass;
 
@@ -765,8 +804,11 @@ function CohortDetailModal({ compositeId, termFilter, selectedDiscipline, onClos
   }
 
   function saveEditCourse(code: string) {
-    // Fire a PATCH for each (course, group) whose coordinator changed
-    const promises: Array<Promise<void>> = [];
+    // Fire a PATCH for each (course, group) whose coordinator changed.
+    // Uses mutateAsync (not mutate) — concurrent mutate() calls on the same
+    // useMutation instance overwrite each other's onSuccess/onError, so with
+    // multiple groups some PATCHes would silently never resolve here.
+    const promises: Array<Promise<unknown>> = [];
     cohort!.groups.forEach(g => {
       const key = `${code}_${g.letter}`;
       const newTeacherId = editCoords[key] ?? 0;
@@ -774,14 +816,7 @@ function CohortDetailModal({ compositeId, termFilter, selectedDiscipline, onClos
       if (!classId) return;
       // Only PATCH if value changed
       if (newTeacherId !== (cohort!.coordinators[key] ?? 0)) {
-        promises.push(
-          new Promise<void>((resolve, reject) =>
-            runUpdateClass(
-              { id: classId, payload: { coordinator_id: newTeacherId || null } },
-              { onSuccess: () => resolve(), onError: reject }
-            )
-          )
-        );
+        promises.push(runUpdateClassAsync({ id: classId, payload: { coordinator_id: newTeacherId || null } }));
       }
     });
     Promise.all(promises).then(() => {
@@ -791,7 +826,11 @@ function CohortDetailModal({ compositeId, termFilter, selectedDiscipline, onClos
   }
 
   function deleteCourse(code: string) {
-    // Delete all CourseClass rows for this course across every group
+    // Delete all CourseClass rows for this course across every group.
+    // Uses mutateAsync (not mutate) — concurrent mutate() calls on the same
+    // useMutation instance overwrite each other's onSuccess/onError, so with
+    // multiple groups one of the deletes could succeed on the backend but
+    // never resolve here, leaving the confirm dialog stuck open forever.
     const classIds = cohort!.groups
       .map(g => cohort!.courseClassIds[`${code}_${g.letter}`])
       .filter((id): id is number => !!id);
@@ -802,13 +841,7 @@ function CohortDetailModal({ compositeId, termFilter, selectedDiscipline, onClos
       return;
     }
 
-    const deletions = classIds.map(
-      id => new Promise<void>((resolve, reject) =>
-        runDeleteClass(id, { onSuccess: () => resolve(), onError: reject })
-      )
-    );
-
-    Promise.all(deletions)
+    Promise.all(classIds.map(id => runDeleteClassAsync(id)))
       .then(() => {
         setConfirmDelCourse(null);
         onToast(`${code} removed`, "success");

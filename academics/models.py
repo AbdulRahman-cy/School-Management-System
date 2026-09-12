@@ -170,6 +170,16 @@ class CourseClass(TimestampedModel):
         help_text="Inherits from StudyGroup on creation, but can be overridden later."
     )
 
+    schedule_dirty = models.BooleanField(
+        default=False,
+        help_text=(
+            "True when a solver-relevant input (currently: coordinator) changed "
+            "after this class was already scheduled, so its existing sessions no "
+            "longer reflect the intended constraints. Cleared once the cohort is "
+            "(re)scheduled."
+        ),
+    )
+
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=["course", "group"], name="unique_course_group")

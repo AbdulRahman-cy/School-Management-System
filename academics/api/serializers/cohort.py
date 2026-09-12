@@ -186,7 +186,7 @@ class CohortReadSerializer(serializers.Serializer):
     year_level     = serializers.IntegerField()
     groups         = CohortGroupReadSerializer(many=True)
     course_classes = CohortCourseClassReadSerializer(many=True)
-    is_scheduled   = serializers.BooleanField()
+    schedule_status = serializers.ChoiceField(choices=["unscheduled", "needs_reschedule", "scheduled"])
 
     def get_id(self, obj) -> str:
         return f"{obj['discipline'].id}_{obj['term'].id}_{obj['year_level']}"

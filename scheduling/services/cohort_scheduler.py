@@ -31,6 +31,27 @@ class InfeasibleScheduleError(SchedulingError):
     """Turn into a 409 at the API boundary."""
 
 
+class RescheduleConfirmationRequiredError(SchedulingError):
+    """
+    Raised (before the solver ever runs) when a non-force, non-dry-run request
+    would replace an existing schedule. Carries structured counts so the API
+    boundary can hand the frontend real numbers instead of a prose string to
+    pattern-match on.
+    """
+
+    def __init__(self, stale_session_count: int, affected_enrollment_count: int):
+        self.stale_session_count = stale_session_count
+        self.affected_enrollment_count = affected_enrollment_count
+        message = f"This cohort already has a schedule ({stale_session_count} session(s))."
+        if affected_enrollment_count:
+            message += (
+                f" {affected_enrollment_count} enrollment(s) reference those sessions and "
+                "will have their session assignment cleared."
+            )
+        message += " Pass force=true to proceed."
+        super().__init__(message)
+
+
 @dataclass
 class ScheduleResult:
     status: str  # "OPTIMAL" | "FEASIBLE"
@@ -67,6 +88,16 @@ class CohortSchedulerService:
             with connection.cursor() as cur:
                 cur.execute("SELECT pg_advisory_xact_lock(%s)", [self.term.pk])
 
+            # Cheap existence check, done BEFORE the CP-SAT solve. Previously this
+            # lived inside _persist(), which meant a non-force reschedule attempt
+            # ran the full (up to time_limit-second) solve, computed a complete
+            # assignment, and only then found out it was going to be rejected —
+            # discarding all of that work. Since "does this cohort already have a
+            # schedule" doesn't depend on the solve result, checking it first turns
+            # a wasted full solve into a near-instant response.
+            if not dry_run and not self.force:
+                self._check_for_existing_schedule()
+
             cohort_classes = self._get_cohort_classes()
             if not cohort_classes:
                 raise SchedulingError("No CourseClasses found for this cohort.")
@@ -75,8 +106,9 @@ class CohortSchedulerService:
             timeslots = list(Timeslot.objects.all().order_by("day", "period"))
             rooms = list(Room.objects.filter(is_active=True).select_related("department"))
             locked_slots = self._get_locked_slots()
+            locked_teacher_slots = self._get_locked_teacher_slots()
 
-            solved = self._solve(requirements, timeslots, rooms, locked_slots)
+            solved = self._solve(requirements, timeslots, rooms, locked_slots, locked_teacher_slots)
             if solved is None:
                 raise InfeasibleScheduleError(
                     "No feasible schedule for this cohort given current room "
@@ -98,6 +130,27 @@ class CohortSchedulerService:
                 solve_time_seconds=solve_time,
                 course_classes_scheduled=len(cohort_classes),
             )
+
+    # ── pre-flight checks ───────────────────────────────────────────────
+
+    def _check_for_existing_schedule(self) -> None:
+        stale_qs = Session.objects.filter(
+            course_class__group__discipline=self.discipline,
+            course_class__group__term=self.term,
+            course_class__group__year_level=self.year_level,
+        )
+        stale_count = stale_qs.count()
+        if not stale_count:
+            return
+
+        from records.models import Enrollment
+
+        affected = Enrollment.objects.filter(
+            Q(lecture_session__in=stale_qs)
+            | Q(tutorial_session__in=stale_qs)
+            | Q(lab_session__in=stale_qs)
+        ).count()
+        raise RescheduleConfirmationRequiredError(stale_count, affected)
 
     # ── data gathering ──────────────────────────────────────────────────
 
@@ -132,6 +185,24 @@ class CohortSchedulerService:
         ).values_list("timeslot_id", "room_id")
         return set(other)
 
+    def _get_locked_teacher_slots(self) -> set[tuple[int, int]]:
+        """(coordinator_id, timeslot_id) pairs already claimed by a LECTURE
+        that teacher gives in another cohort this term.
+
+        Only LECTURE sessions are tracked per-teacher: `coordinator` means
+        "who gives the lecture," and TUTORIAL/LAB sessions don't record who
+        runs them (could be a TA, could be the same coordinator — that's a
+        future `Session.teacher` field, not this one)."""
+        other = Session.objects.filter(
+            session_type=LECTURE,
+            course_class__coordinator__isnull=False,
+            course_class__group__term=self.term,
+        ).exclude(
+            course_class__group__discipline=self.discipline,
+            course_class__group__year_level=self.year_level,
+        ).values_list("course_class__coordinator_id", "timeslot_id")
+        return set(other)
+
     # ── CP-SAT model ────────────────────────────────────────────────────
 
     def _eligible_rooms(self, rooms, stype, dept_id):
@@ -144,7 +215,7 @@ class CohortSchedulerService:
         # ...only fall back to "any room of the right type" if the dept has none.
         return [i for i, r in enumerate(rooms) if r.room_type in allowed]
 
-    def _solve(self, requirements, timeslots, rooms, locked_slots):
+    def _solve(self, requirements, timeslots, rooms, locked_slots, locked_teacher_slots):
         model = cp_model.CpModel()
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = self.time_limit
@@ -162,6 +233,9 @@ class CohortSchedulerService:
                 raise SchedulingError(f"No '{req['type']}' room exists for {req['cc'].course.code}.")
 
             for ts_idx, ts in enumerate(timeslots):
+                if (req["type"] == LECTURE and req["cc"].coordinator_id
+                        and (req["cc"].coordinator_id, ts.id) in locked_teacher_slots):
+                    continue  # this teacher already has a lecture elsewhere this slot
                 for r_idx in eligible:
                     room = rooms[r_idx]
                     if (ts.id, room.id) in locked_slots:
@@ -179,7 +253,9 @@ class CohortSchedulerService:
             if not options:
                 raise InfeasibleScheduleError(
                     f"Every valid room/timeslot combo for {req['cc'].course.code} "
-                    f"({req['type']}) is already booked by another cohort this term."
+                    f"({req['type']}) is already booked by another cohort this term, "
+                    f"or its coordinator is already teaching elsewhere at every "
+                    f"remaining slot."
                 )
             model.add_exactly_one(options)
 
@@ -202,6 +278,21 @@ class CohortSchedulerService:
                 if len(overlapping) > 1:
                     model.add_at_most_one(overlapping)
 
+        # Constraint 4: no two LECTURE requirements coordinated by the same
+        # teacher share a timeslot, within this solve. (Cross-cohort conflicts
+        # for the same teacher are handled earlier, by locked_teacher_slots
+        # filtering those options out before variables even exist.)
+        by_teacher = defaultdict(list)
+        for req in requirements:
+            if req["type"] == LECTURE and req["cc"].coordinator_id:
+                by_teacher[req["cc"].coordinator_id].append(req)
+        for teacher_reqs in by_teacher.values():
+            for ts_idx in range(len(timeslots)):
+                overlapping = [assign[req["req_idx"], ts_idx, r_idx] for req in teacher_reqs
+                               for r_idx in range(len(rooms)) if (req["req_idx"], ts_idx, r_idx) in assign]
+                if len(overlapping) > 1:
+                    model.add_at_most_one(overlapping)
+
         status = solver.solve(model)
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return None
@@ -220,34 +311,24 @@ class CohortSchedulerService:
     # ── persistence ─────────────────────────────────────────────────────
 
     def _persist(self, assignments) -> int:
-        stale_qs = Session.objects.filter(
+        # The "already has a schedule, need force=true" guard now runs up front in
+        # run() — via _check_for_existing_schedule() — before the solve even starts,
+        # so by the time we get here we're either force=True or there was nothing
+        # stale to begin with. No need to re-check.
+        Session.objects.filter(
             course_class__group__discipline=self.discipline,
             course_class__group__term=self.term,
             course_class__group__year_level=self.year_level,
-        )
-        stale_ids = list(stale_qs.values_list("id", flat=True))
+        ).delete()
 
-        if stale_ids and not self.force:
-            from records.models import Enrollment
-            from django.db.models import Q
-            affected = Enrollment.objects.filter(
-                Q(lecture_session_id__in=stale_ids)
-                | Q(tutorial_session_id__in=stale_ids)
-                | Q(lab_session_id__in=stale_ids)
-            ).count()
-            if affected:
-                raise SchedulingError(
-                    f"{affected} enrollment(s) reference sessions from the previous "
-                    f"run for this cohort. Re-scheduling clears their session "
-                    f"assignment (SET_NULL cascade). Pass force=true to proceed."
-                )
-            raise SchedulingError(
-                f"This cohort already has a schedule ({len(stale_ids)} session(s)). "
-                f"Re-scheduling will replace it. Pass force=true to proceed."
-            )
-
-        stale_qs.delete()
         sessions = [Session(course_class=cc, session_type=t, timeslot=ts, room=r)
                     for cc, t, ts, r in assignments]
         Session.objects.bulk_create(sessions)
+
+        # This run's assignments are now authoritative for every class they cover —
+        # clear the dirty flag so the cohort list stops reporting "needs reschedule".
+        CourseClass.objects.filter(
+            id__in={cc.id for cc, _, _, _ in assignments}
+        ).update(schedule_dirty=False)
+
         return len(sessions)
