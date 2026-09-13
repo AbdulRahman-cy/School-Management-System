@@ -3,6 +3,7 @@ import { apiClient } from "./auth";
 import type {
   StudentProfile, Enrollment, EnrollmentRow, Session,
   ExamResult, StudentSubmission, Exam, Assignment,
+  AdminDashboardData, TeacherDashboardData,
 } from "../types";
 
 // ─── Reference data types (disciplines / terms / courses / teachers) ──────────
@@ -141,7 +142,11 @@ export const queryKeys = {
   courses:        ()                                 => ["courses"] as const,
   teachers:       (departmentId?: number)            => ["teachers", { departmentId }] as const,
   availableGroups: ()                                => ["available-groups"] as const,
+  adminAvailableGroups: (studentId: number)          => ["admin-available-groups", studentId] as const,
   liveCapacities:  (classIds: number[])               => ["live-capacities", classIds] as const,
+  adminDashboard:  ()                                 => ["admin-dashboard"] as const,
+  teacherDashboard: ()                                => ["teacher-dashboard"] as const,
+  teacherSessions:  ()                                => ["teacher-sessions"] as const,
 };
  
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
@@ -171,10 +176,12 @@ async function fetchEnrollmentSummary(
   return data;
 }
  
-async function fetchStudentSessions(studentId: number): Promise<Session[]> {
-  const { data } = await apiClient.get<Session[]>("/scheduling/schedule-sessions/", {
-    params: { student: studentId },
-  });
+// The backend derives "my schedule" from the authenticated user's own
+// student/teacher profile — it never trusts a client-supplied id — so this
+// one fetcher serves both the student's Timetable tab and the teacher/admin
+// Timetable tab; no id needs to be (or can be) passed.
+async function fetchMySessions(): Promise<Session[]> {
+  const { data } = await apiClient.get<Session[]>("/scheduling/schedule-sessions/");
   return data;
 }
  
@@ -245,14 +252,44 @@ export function usePastEnrollments(studentId: number | null) {
     enabled:   ENABLED(studentId),
   });
 }
- 
-export function useStudentSessions(studentId: number | null) {
+
+// Full Enrollment records (nested course_class.id included) rather than the
+// flat EnrollmentRow shape from useEnrollments — needed wherever a caller has
+// to feed the CourseClass id back into enroll/unenroll (e.g. a "Drop" button),
+// not just display it. Suffixed key keeps this from colliding with
+// useEnrollments' cache entry for the same (studentId, termStatus) pair.
+export function useEnrollmentDetails(
+  studentId: number | null,
+  termStatus: "active" | "past" | "all" = "active",
+) {
   return useQuery({
-    queryKey:  queryKeys.sessions(studentId ?? 0),
-    queryFn:   () => fetchStudentSessions(studentId as number),
+    queryKey:  [...queryKeys.enrollments(studentId ?? 0, termStatus), "full"] as const,
+    queryFn:   () => fetchEnrollments(studentId as number, termStatus),
     staleTime: 2 * 60 * 1000,
     retry:     1,
     enabled:   ENABLED(studentId),
+  });
+}
+ 
+export function useStudentSessions(studentId: number | null) {
+  return useQuery({
+    // studentId only gates readiness here — the backend ignores it and
+    // scopes strictly to the authenticated user's own enrollments.
+    queryKey:  queryKeys.sessions(studentId ?? 0),
+    queryFn:   fetchMySessions,
+    staleTime: 2 * 60 * 1000,
+    retry:     1,
+    enabled:   ENABLED(studentId),
+  });
+}
+
+export function useTeacherSessions(enabled: boolean = true) {
+  return useQuery({
+    queryKey:  queryKeys.teacherSessions(),
+    queryFn:   fetchMySessions,
+    staleTime: 2 * 60 * 1000,
+    retry:     1,
+    enabled,
   });
 }
  
@@ -317,6 +354,16 @@ async function fetchTeachers(departmentId?: number): Promise<TeacherOption[]> {
   const { data } = await apiClient.get<TeacherOption[]>("/users/teachers/", {
     params: departmentId ? { department_id: departmentId } : undefined,
   });
+  return data;
+}
+
+async function fetchAdminDashboard(): Promise<AdminDashboardData> {
+  const { data } = await apiClient.get<AdminDashboardData>("/academics/admin-dashboard/");
+  return data;
+}
+
+async function fetchTeacherDashboard(): Promise<TeacherDashboardData> {
+  const { data } = await apiClient.get<TeacherDashboardData>("/academics/teacher-dashboard/");
   return data;
 }
 
@@ -518,6 +565,10 @@ export type EnrollRequest =
   | { study_group_id: number; course_class_id?: never }
   | { course_class_id: number; study_group_id?: never };
 
+export type AdminEnrollRequest =
+  | { student_id: number; study_group_id: number; course_class_id?: never }
+  | { student_id: number; course_class_id: number; study_group_id?: never };
+
 /** POST /enroll/ response: created Enrollment rows, or a no-op notice if already enrolled in every requested class. */
 export type EnrollResult = Enrollment[] | { detail: string };
 
@@ -559,6 +610,23 @@ export function useTeachers(departmentId?: number) {
     queryKey:  queryKeys.teachers(departmentId),
     queryFn:   () => fetchTeachers(departmentId),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAdminDashboard() {
+  return useQuery({
+    queryKey:  queryKeys.adminDashboard(),
+    queryFn:   fetchAdminDashboard,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useTeacherDashboard(enabled: boolean = true) {
+  return useQuery({
+    queryKey:  queryKeys.teacherDashboard(),
+    queryFn:   fetchTeacherDashboard,
+    staleTime: 60 * 1000,
+    enabled,
   });
 }
 
@@ -766,6 +834,60 @@ export function useUnenroll() {
   return useMutation({
     mutationFn: unenroll,
     onSuccess: () => invalidateEnrollmentCaches(queryClient),
+  });
+}
+
+// ─── Enrollment (admin) fetchers & hooks ───────────────────────────────────────
+// Admin-facing counterparts of the self-service endpoints above — same request/
+// response shapes, but scoped to an arbitrary student_id chosen by the admin
+// instead of the authenticated user's own profile.
+
+async function fetchAdminAvailableGroups(studentId: number): Promise<AvailableGroupsResponse> {
+  const { data } = await apiClient.get<AvailableGroupsResponse>(
+    "/records/admin-enrollment/available-groups/",
+    { params: { student_id: studentId } },
+  );
+  return data;
+}
+
+async function adminEnroll(payload: AdminEnrollRequest): Promise<EnrollResult> {
+  const { data } = await apiClient.post<EnrollResult>("/records/admin-enrollment/enroll/", payload);
+  return data;
+}
+
+async function adminUnenroll(payload: AdminEnrollRequest): Promise<UnenrollResult> {
+  const { data } = await apiClient.post<UnenrollResult>("/records/admin-enrollment/unenroll/", payload);
+  return data;
+}
+
+export function useAdminAvailableGroups(studentId: number | null) {
+  return useQuery({
+    queryKey:  queryKeys.adminAvailableGroups(studentId ?? 0),
+    queryFn:   () => fetchAdminAvailableGroups(studentId as number),
+    staleTime: 30 * 1000,
+    enabled:   ENABLED(studentId),
+  });
+}
+
+function invalidateAdminEnrollmentCaches(queryClient: ReturnType<typeof useQueryClient>): void {
+  queryClient.invalidateQueries({ queryKey: ["admin-available-groups"] });
+  queryClient.invalidateQueries({ queryKey: ["enrollments"] });
+  queryClient.invalidateQueries({ queryKey: ["live-capacities"] });
+}
+
+export function useAdminEnroll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: adminEnroll,
+    onSuccess: () => invalidateAdminEnrollmentCaches(queryClient),
+  });
+}
+
+export function useAdminUnenroll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: adminUnenroll,
+    onSuccess: () => invalidateAdminEnrollmentCaches(queryClient),
   });
 }
 

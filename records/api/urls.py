@@ -4,6 +4,7 @@ from records.api.views import (
     AssignmentViewSet, AttendanceViewSet, EnrollmentViewSet,
     ExamResultViewSet, ExamViewSet, GradeEntryViewSet,
     StudentSubmissionViewSet, StudentEnrollmentViewSet,
+    AdminEnrollmentViewSet,
 )
 
 router = DefaultRouter()
@@ -15,6 +16,7 @@ router.register(r'exam-results', ExamResultViewSet, basename='examresult')
 router.register(r'assignments', AssignmentViewSet, basename='assignment')
 router.register(r'student-submissions', StudentSubmissionViewSet, basename='studentsubmission')
 router.register(r'self-service', StudentEnrollmentViewSet, basename='self-service')
+router.register(r'admin-enrollment', AdminEnrollmentViewSet, basename='admin-enrollment')
 
 
 urlpatterns = [

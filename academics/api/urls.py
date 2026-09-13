@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from academics.api.views import (
     CourseClassViewSet, CourseViewSet, DepartmentViewSet,
     DisciplineViewSet, RoomViewSet, StudyGroupViewSet, TermViewSet,
-    CohortViewSet,
+    CohortViewSet, AdminDashboardView, TeacherDashboardView,
 )
 
 
@@ -19,5 +19,7 @@ router.register(r"classes", CourseClassViewSet, basename="class")
 router.register(r"cohorts", CohortViewSet, basename="cohort")
 
 urlpatterns = [
+    path("admin-dashboard/", AdminDashboardView.as_view(), name="admin-dashboard"),
+    path("teacher-dashboard/", TeacherDashboardView.as_view(), name="teacher-dashboard"),
     path("", include(router.urls)),
 ]

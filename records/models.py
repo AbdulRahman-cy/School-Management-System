@@ -94,6 +94,17 @@ class Enrollment(TimestampedModel):
                 name="unique_student_enrollment",
             )
         ]
+        indexes = [
+            # Dashboards count ENROLLED rows per course_class; historical
+            # statuses (COMPLETED, etc.) vastly outnumber ENROLLED ones, so a
+            # partial index keyed on just the active rows keeps that count
+            # a cheap index scan instead of a full-table scan.
+            models.Index(
+                fields=["course_class"],
+                condition=Q(status="ENROLLED"),
+                name="enrollment_active_by_class_idx",
+            ),
+        ]
 
 
     def clean(self):

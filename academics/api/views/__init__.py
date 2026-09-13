@@ -6,6 +6,8 @@ from .room import RoomViewSet
 from .course_class import CourseClassViewSet
 from .study_group import StudyGroupViewSet
 from .cohort import CohortViewSet
+from .admin_dashboard import AdminDashboardView
+from .teacher_dashboard import TeacherDashboardView
 
 __all__ = [
     "DepartmentViewSet",
@@ -16,4 +18,6 @@ __all__ = [
     "CourseClassViewSet",
     "StudyGroupViewSet",
     "CohortViewSet",
+    "AdminDashboardView",
+    "TeacherDashboardView",
 ]

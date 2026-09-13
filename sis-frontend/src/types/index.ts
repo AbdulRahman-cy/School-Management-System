@@ -299,3 +299,53 @@ export interface NextClassInfo {
   room: string;         // flat string — room.name
   timeslot: Timeslot;
 }
+
+/** Global active-term counters for the Admin Dashboard's top stat row */
+export interface AdminDashboardStats {
+  total_active_classes: number;
+  total_scheduled_sessions: number;
+  total_enrolled_students: number;
+}
+
+/** One row of the Admin Dashboard's "Term Overview" table */
+export interface AdminDashboardClassRow {
+  id: number;
+  course_code: string;
+  course_title: string;
+  group_label: string;   // e.g. "G1 · CCE" — group number + discipline code
+  term_name: string;
+  year_level: number;      // 1–4
+  discipline_code: string;
+  discipline_name: string;
+  capacity: number;
+  enrolled_count: number;
+}
+
+export interface AdminDashboardData {
+  stats: AdminDashboardStats;
+  classes: AdminDashboardClassRow[];
+}
+
+/** One scheduled session summary nested inside a TeacherDashboardClassRow. */
+export interface TeacherDashboardSession {
+  session_type: SessionType;
+  day: DayInt;
+  day_display: string;
+  period: PeriodInt;
+  period_display: string;
+  room_code: string;
+}
+
+/**
+ * One row of the Teacher Dashboard's "My Classes" table — the same shape as
+ * AdminDashboardClassRow, scoped to the requesting teacher's own coordinated
+ * classes, plus that class's scheduled sessions for an at-a-glance timetable.
+ */
+export interface TeacherDashboardClassRow extends AdminDashboardClassRow {
+  sessions: TeacherDashboardSession[];
+}
+
+export interface TeacherDashboardData {
+  stats: AdminDashboardStats;
+  classes: TeacherDashboardClassRow[];
+}

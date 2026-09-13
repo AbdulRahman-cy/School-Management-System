@@ -16,6 +16,15 @@ from .cohort import (
     ScheduleCohortRequestSerializer,
     ScheduleCohortResponseSerializer,
 )
+from .dashboard_common import (
+    DashboardStatsSerializer,
+    DashboardClassRowSerializer,
+)
+from .admin_dashboard import (
+    AdminDashboardStatsSerializer,
+    AdminDashboardClassRowSerializer,
+)
+from .teacher_dashboard import TeacherDashboardClassRowSerializer
 
 __all__ = [
     "DepartmentSerializer",
@@ -37,4 +46,9 @@ __all__ = [
     "CohortReadSerializer",
     "ScheduleCohortRequestSerializer",
     "ScheduleCohortResponseSerializer",
+    "DashboardStatsSerializer",
+    "DashboardClassRowSerializer",
+    "AdminDashboardStatsSerializer",
+    "AdminDashboardClassRowSerializer",
+    "TeacherDashboardClassRowSerializer",
 ]

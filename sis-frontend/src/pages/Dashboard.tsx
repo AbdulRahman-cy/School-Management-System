@@ -8,26 +8,15 @@ import ExamSchedulePage from "./ExamSchedulePage";
 import StudyGroupsPage from "./StudyGroupsPage";
 import GradesPage from "./GradesPage";
 import EnrollmentPage from "./EnrollmentPage";
+import WeeklyTimetable from "./WeeklyTimetable";
+import TeacherTimetable from "./TeacherTimetable";
+import { DAY_LABELS, PERIOD_LABELS, getAlexDay } from "./timetableUtils";
 import { useAuth } from '../context/AuthContext';
 
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const DAY_LABELS = ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"];
-
-const PERIOD_LABELS: Record<number, string> = {
-  1: "08:00–09:30",
-  2: "09:45–11:15",
-  3: "11:30–13:00",
-  4: "13:30–15:00",
-  5: "15:15–16:45",
-};
-
-function getAlexDay(): number {
-  const jsDay = new Date().getDay();
-  const map: Record<number, number> = { 6: 0, 0: 1, 1: 2, 2: 3, 3: 4, 4: 5, 5: -1 };
-  return map[jsDay] ?? -1;
-}
+// DAY_LABELS/PERIOD_LABELS/getAlexDay live in WeeklyTimetable.tsx (the grid's
+// home) and are re-used here only for the "next class" widget's calculation.
 
 function getCurrentPeriod(): number {
   const mins = new Date().getHours() * 60 + new Date().getMinutes();
@@ -165,15 +154,28 @@ const ALL_STUDENT_NAV_ITEMS = [
   { id: "warnings",    label: "Academic Standing", icon: "△", group: "ADMIN" },
 ];
 
+import AdminDashboard from "./AdminDashboard";
 import TeacherDashboard from "./TeacherDashboard";
+import AdminEnrollmentsPage from "./AdminEnrollmentsPage";
 
+/**
+ * Nav items are static — never gated behind a data fetch. Every section
+ * (Grades, Study Groups, ...) mounts its own query lazily on first render,
+ * only once the user actually clicks into it; Teacher Dashboard follows the
+ * same rule. An ADMIN with no TeacherProfile just sees an empty/zeroed
+ * Teacher Dashboard (the API 403s; TeacherDashboard.tsx already renders an
+ * empty-state table either way) rather than the tab being probed on load.
+ */
 function getNavItems(user: { role: string; email: string } | null) {
   if (!user) return ALL_STUDENT_NAV_ITEMS;
   if (user.role === "STUDENT") return ALL_STUDENT_NAV_ITEMS;
   if (user.role === "ADMIN") {
     return [
-      { id: "dashboard", label: "Teacher Dashboard", icon: "⊞", group: "" },
-      { id: "study-groups", label: "Study Groups", icon: "👥", group: "ADMIN" }
+      { id: "dashboard", label: "Admin Dashboard", icon: "⊞", group: "" },
+      { id: "teacher-dashboard", label: "Teacher Dashboard", icon: "🎓", group: "" },
+      { id: "teacher-timetable", label: "Timetable", icon: "▦", group: "" },
+      { id: "study-groups", label: "Study Groups", icon: "👥", group: "ADMIN" },
+      { id: "admin-enrollments", label: "Enrollments", icon: "📋", group: "ADMIN" },
     ];
   }
   // fail-closed: unknown/unrecognized roles get the basic student nav, no admin tabs
@@ -203,29 +205,42 @@ export default function UniversityPortal() {
   const { data: teachers = [] }       = useTeachers();
 
   const isTeacher = user?.role === "TEACHER";
+  const isAdmin = user?.role === "ADMIN";
   const currentTeacher = useMemo(() => {
     if (!isTeacher) return null;
     return teachers.find(t => t.user?.email === user?.email || t.user_name.includes(user?.email ?? ""));
   }, [teachers, user, isTeacher]);
 
+  // ADMIN has neither a StudentProfile nor a TeacherOption entry to borrow
+  // display info from — it's just the BaseUser record itself.
   const userFirstName = isTeacher
     ? (user?.first_name || currentTeacher?.user?.first_name || "Teacher")
+    : isAdmin
+    ? (user?.first_name || user?.email.split("@")[0] || "Admin")
     : (profile?.user?.first_name ?? "");
 
   const userFullName = isTeacher
     ? (user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : currentTeacher?.user_name || `${user?.first_name || ""} ${user?.last_name || ""}`.trim() || user?.email.split("@")[0] || "Teacher")
+    : isAdmin
+    ? (`${user?.first_name || ""} ${user?.last_name || ""}`.trim() || user?.email.split("@")[0] || "Administrator")
     : (profile ? (profile.user.full_name || `${profile.user.first_name} ${profile.user.last_name}`.trim() || "—") : "—");
 
   const userIdDisplay = isTeacher
     ? (currentTeacher?.id ? `${currentTeacher.id}` : user?.id ? `${user.id}` : "1")
+    : isAdmin
+    ? (user?.id ? String(user.id) : "—")
     : (profile?.id ? String(profile.id) : "—");
 
   const userDepartmentOrDiscipline = isTeacher
     ? (currentTeacher?.department_name || "Faculty Member")
+    : isAdmin
+    ? "Administrator"
     : (profile?.discipline?.name ?? "—");
 
   const userInitials = isTeacher
     ? (user?.first_name?.[0] && user?.last_name?.[0] ? `${user.first_name[0]}${user.last_name[0]}` : (user?.first_name?.[0] || "T"))
+    : isAdmin
+    ? (user?.first_name?.[0] && user?.last_name?.[0] ? `${user.first_name[0]}${user.last_name[0]}` : (user?.first_name?.[0] || "A"))
     : (profile ? (`${profile.user.first_name?.[0] ?? ""}${profile.user.last_name?.[0] ?? ""}` || "?") : "…");
 
   if (profileError)  console.error("[useStudentProfile] failed");
@@ -275,17 +290,6 @@ export default function UniversityPortal() {
     }
     return result.sort((a, b) => a.week - b.week);
   }, [upcomingExams, upcomingAssignments]);
-
-  const scheduleMap = useMemo(() => {
-    const map: Record<string, Session[]> = {};
-    if (!sessions) return map;
-    for (const s of sessions) {
-      const key = `${s.timeslot.day}-${s.timeslot.period}`;
-      if (!map[key]) map[key] = [];
-      map[key].push(s);
-    }
-    return map;
-  }, [sessions]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setCmdOpen(v => !v); } };
@@ -421,6 +425,8 @@ export default function UniversityPortal() {
           <main style={{ flex: 1, padding: "22px", overflowY: "auto" }}>
 
             {activeNav === "dashboard" && user?.role === "ADMIN" ? (
+              <AdminDashboard />
+            ) : activeNav === "teacher-dashboard" ? (
               <TeacherDashboard />
             ) : activeNav === "dashboard" ? (
               <>
@@ -683,92 +689,10 @@ export default function UniversityPortal() {
                 </div>
               </div>
             ) : activeNav === "schedule" ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                <div className="ani0">
-                  <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e1b4b", letterSpacing: "-.4px" }}>My Timetable</h2>
-                  <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>Weekly schedule · {sessions?.length ?? 0} sessions this term</p>
-                </div>
+              <WeeklyTimetable sessions={sessions} isLoading={sessionsLoading} />
 
-                <div className="ani0" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  {[{ type: "LECTURE", color: "#6d28d9", dot: "#7c3aed" }, { type: "LAB", color: "#065f46", dot: "#10b981" }, { type: "TUTORIAL", color: "#92400e", dot: "#f59e0b" }].map(({ type, color, dot }) => (
-                    <div key={type} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color }}>
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: dot }} />{type}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="ani1" style={{ background: "#fff", borderRadius: 16, border: "1px solid #ede9fe", overflow: "hidden" }}>
-                  {sessionsLoading ? (
-                    <div style={{ padding: 20 }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "80px repeat(6,1fr)", gap: 8, marginBottom: 8 }}><div />{[0,1,2,3,4,5].map(i => <Skeleton key={i} h={32} r={8} />)}</div>
-                      {[0,1,2,3,4].map(r => (
-                        <div key={r} style={{ display: "grid", gridTemplateColumns: "80px repeat(6,1fr)", gap: 8, marginBottom: 8 }}>
-                          <Skeleton h={72} r={8} />{[0,1,2,3,4,5].map(c => <div key={c} style={{ height: 72 }}>{(r+c)%3!==0&&<Skeleton h={72} r={8} />}</div>)}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ overflowX: "auto" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
-                        <thead>
-                          <tr>
-                            <th style={{ width: 88, padding: "12px 14px", borderBottom: "1px solid #ede9fe", borderRight: "1px solid #ede9fe", background: "#faf5ff" }} />
-                            {DAY_LABELS.map((day, d) => (
-                              <th key={d} style={{ padding: "12px 10px", textAlign: "center", fontSize: 11, fontWeight: 700, color: d===getAlexDay()?"#7c3aed":"#64748b", letterSpacing: ".3px", borderBottom: "1px solid #ede9fe", borderRight: d<5?"1px solid #ede9fe":"none", background: d===getAlexDay()?"#faf5ff":"#fff", position: "relative" }}>
-                                {day.slice(0,3).toUpperCase()}
-                                {d===getAlexDay()&&<div style={{ position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)", width:20, height:2, background:"#7c3aed", borderRadius:99 }} />}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {([1,2,3,4,5] as const).map((period, pi) => (
-                            <tr key={period} style={{ borderBottom: pi<4?"1px solid #ede9fe":"none" }}>
-                              <td style={{ padding: "10px 14px", borderRight: "1px solid #ede9fe", background: "#faf5ff", verticalAlign: "middle" }}>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: "#7c3aed", marginBottom: 2 }}>P{period}</div>
-                                <div style={{ fontSize: 9, color: "#94a3b8", whiteSpace: "nowrap", fontFamily: "'JetBrains Mono',monospace" }}>{PERIOD_LABELS[period]}</div>
-                              </td>
-                              {([0,1,2,3,4,5] as const).map((day, di) => {
-                                const cellSessions = scheduleMap[`${day}-${period}`] ?? [];
-                                const isToday = day === getAlexDay();
-                                return (
-                                  <td key={day} style={{ padding: 6, verticalAlign: "top", borderRight: di<5?"1px solid #ede9fe":"none", background: isToday?"#fefbff":"transparent", minWidth: 100 }}>
-                                    {cellSessions.length === 0
-                                      ? <div style={{ height: 80, borderRadius: 8, border: "1.5px dashed #ede9fe", background: "#fafafa" }} />
-                                      : cellSessions.map(s => {
-                                          const ts: Record<string,{bg:string;border:string;badge:string;badgeTxt:string;dot:string}> = {
-                                            LECTURE:  {bg:"#faf5ff",border:"#ddd6fe",badge:"#ede9fe",badgeTxt:"#6d28d9",dot:"#7c3aed"},
-                                            LAB:      {bg:"#f0fdf4",border:"#bbf7d0",badge:"#d1fae5",badgeTxt:"#065f46",dot:"#10b981"},
-                                            TUTORIAL: {bg:"#fffbeb",border:"#fde68a",badge:"#fef3c7",badgeTxt:"#92400e",dot:"#f59e0b"},
-                                          };
-                                          const st = ts[s.session_type] ?? ts.LECTURE;
-                                          return (
-                                            <div key={s.id} style={{ height:80, borderRadius:8, padding:"8px 9px", background:st.bg, border:`1.5px solid ${st.border}`, display:"flex", flexDirection:"column", justifyContent:"space-between", cursor:"default", transition:"transform .15s,box-shadow .15s" }}
-                                              onMouseEnter={e=>{(e.currentTarget as HTMLDivElement).style.transform="translateY(-2px)";(e.currentTarget as HTMLDivElement).style.boxShadow="0 6px 18px rgba(124,58,237,0.12)";}}
-                                              onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.transform="";(e.currentTarget as HTMLDivElement).style.boxShadow="";}}>
-                                              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:4}}>
-                                                <CourseCodePill code={s.course_code} size="sm" />
-                                                <span style={{fontSize:8,fontWeight:700,padding:"2px 5px",borderRadius:4,background:st.badge,color:st.badgeTxt,letterSpacing:".3px",flexShrink:0,lineHeight:1.4}}>{s.session_type.slice(0,3)}</span>
-                                              </div>
-                                              <div style={{fontSize:9.5,color:"#64748b",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",lineHeight:1.35}}>{s.course_name}</div>
-                                              <div style={{display:"flex",alignItems:"center",gap:3,fontSize:9,color:"#94a3b8",fontWeight:500}}>
-                                                <div style={{width:6,height:6,borderRadius:"50%",background:st.dot,flexShrink:0}} />{s.room}
-                                              </div>
-                                            </div>
-                                          );
-                                        })
-                                    }
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
+            ) : activeNav === "teacher-timetable" ? (
+              <TeacherTimetable />
 
             ) : activeNav === "grades" ? (
               <GradesPage studentId={STUDENT_ID} displayGpa={displayGpa} />
@@ -779,6 +703,9 @@ export default function UniversityPortal() {
 
             ) : activeNav === "study-groups" ? (
               <StudyGroupsPage />
+
+            ) : activeNav === "admin-enrollments" && user?.role === "ADMIN" ? (
+              <AdminEnrollmentsPage />
 
             ) : activeNav === "exams" ? (
               <ExamSchedulePage studentId={STUDENT_ID} />
