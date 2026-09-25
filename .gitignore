@@ -80,3 +80,9 @@ pnpm-debug.log*
 repomix-output.xml
 auto_stress_test.py
 .claude/
+
+loadtest/
+baseline.dump
+
+test_enrollment.py
+

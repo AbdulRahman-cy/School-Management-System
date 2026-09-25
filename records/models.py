@@ -69,7 +69,7 @@ class Enrollment(TimestampedModel):
     status = models.CharField(
         max_length=15,
         choices=EnrollmentStatus.choices,
-        default=EnrollmentStatus.ENROLLED, 
+        default=EnrollmentStatus.ENROLLED,
     )
 
     final_percentage = models.DecimalField(
@@ -78,7 +78,7 @@ class Enrollment(TimestampedModel):
     )
 
     course_grade_points = models.DecimalField(
-        max_digits=3, decimal_places=2, 
+        max_digits=3, decimal_places=2,
         null=True, blank=True,  # Allow it to be empty mid-semester
         help_text="Only calculated when enrollment is COMPLETED."
     )
@@ -90,7 +90,7 @@ class Enrollment(TimestampedModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["student", "course_class"],
-                include=["id"], # Appends the PK directly to the B-tree leaf nodes
+                include=["id"],  # Appends the PK directly to the B-tree leaf nodes
                 name="unique_student_enrollment",
             )
         ]
@@ -104,8 +104,17 @@ class Enrollment(TimestampedModel):
                 condition=Q(status="ENROLLED"),
                 name="enrollment_active_by_class_idx",
             ),
+            # Mirror of the above, keyed by student instead of course_class.
+            # EnrollmentService's timetable-conflict check and batched
+            # duplicate-course check both filter by student + status=ENROLLED
+            # before joining onward — this is what makes those an index scan
+            # instead of a sequential scan.
+            models.Index(
+                fields=["student"],
+                condition=Q(status="ENROLLED"),
+                name="enr_active_by_student_idx",
+            ),
         ]
-
 
     def clean(self):
         errors = {}
@@ -124,29 +133,47 @@ class Enrollment(TimestampedModel):
                 )
 
         # 2. Duplicate Course Constraint
-        if self.student_id and self.course_class_id:
-            target_course = self.course_class.course
-            target_term = self.course_class.group.term  
+        # Skipped when the caller already verified this for the whole batch
+        # in one query (see EnrollmentService._check_duplicate_courses) —
+        # avoids re-running the same join query once per row inside a held lock.
+        if not getattr(self, "_skip_duplicate_course_check", False):
+            if self.student_id and self.course_class_id:
+                target_course = self.course_class.course
+                # .term_id instead of .term: term_id is a plain FK column
+                # already present on the loaded course_class/group, so this
+                # reads it for free. .term would trigger a fresh query just
+                # to fetch the Term row when all we need is its id.
+                target_term_id = self.course_class.group.term_id
 
-            duplicate_enrollment = Enrollment.objects.filter(
-                student=self.student,
-                course_class__course=target_course,
-                course_class__group__term=target_term  
-            ).exclude(pk=self.pk).exists()
+                duplicate_enrollment = Enrollment.objects.filter(
+                    student=self.student,
+                    course_class__course=target_course,
+                    course_class__group__term_id=target_term_id,
+                ).exclude(pk=self.pk).exists()
 
-            if duplicate_enrollment:
-                errors["course_class"] = (
-                    f"Student is already enrolled in {target_course.code} for {target_term}. "
-                    "You cannot register for two different groups in the same term."
-                )
-        
+                if duplicate_enrollment:
+                    errors["course_class"] = (
+                        f"Student is already enrolled in {target_course.code} for this term. "
+                        "You cannot register for two different groups in the same term."
+                    )
+
         # 3. Fire all errors at once
         if errors:
             raise ValidationError(errors)
-        
 
-    def save(self, *args, **kwargs):
-        self.full_clean()
+    def save(self, *args, skip_duplicate_check: bool = False, **kwargs):
+        """
+        skip_duplicate_check: set by EnrollmentService once it has already
+        verified the whole enroll batch against the duplicate-course rule in
+        a single query (see _check_duplicate_courses). Also disables Django's
+        automatic validate_unique() check for (student, course_class) — the
+        service's own already_enrolled_ids lookup covers that same case, and
+        the IntegrityError catch in the service remains the safety net for
+        any race that slips through. Every other caller (admin actions,
+        signals, tests) keeps full validation by default.
+        """
+        self._skip_duplicate_course_check = skip_duplicate_check
+        self.full_clean(validate_unique=not skip_duplicate_check)
         super().save(*args, **kwargs)
 
     def recalculate_grades(self):
@@ -154,19 +181,19 @@ class Enrollment(TimestampedModel):
         if self.status != self.EnrollmentStatus.COMPLETED:
             self.final_percentage = None
             self.course_grade_points = None
-            # Recall Hussein Nasser 's advice: only update the fields that changed to avoid lost updates in concurrent scenarios.
+            # Recall Hussein Nasser's advice: only update the fields that changed to avoid lost updates in concurrent scenarios.
             self.save(update_fields=['final_percentage', 'course_grade_points', 'updated_at'])
             return
 
         with transaction.atomic():
             # 2. Only hit the database if the term is actually over
             Enrollment.objects.select_for_update().get(pk=self.pk)
-            
+
             raw_total = self.grades.aggregate(total_score=Sum('score'))['total_score'] or 0
             total = Decimal(str(raw_total)).quantize(Decimal('0.01'))
 
             self.final_percentage = total
-            
+
             if total >= 93: self.course_grade_points = Decimal('4.0')
             elif total >= 89: self.course_grade_points = Decimal('3.7')
             elif total >= 84: self.course_grade_points = Decimal('3.3')

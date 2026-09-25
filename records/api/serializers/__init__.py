@@ -3,7 +3,7 @@ from .attendance import AttendanceRecordSerializer
 from .exam import ExamSerializer, ExamResultSerializer
 from .assignment import AssignmentSerializer
 from .submission import StudentSubmissionSerializer
-from .enrollment import EnrollmentSerializer, DashboardEnrollmentSerializer, DashboardFilterSerializer
+from .enrollment import EnrollmentSerializer, DashboardEnrollmentSerializer, DashboardFilterSerializer, EnrollResultSerializer
 from .self_service import EnrollRequestSerializer, AvailableStudyGroupSerializer, AvailableCourseClassSerializer, SessionDetailSerializer
 
 __all__ = [
@@ -16,6 +16,7 @@ __all__ = [
     "EnrollmentSerializer",
     "DashboardEnrollmentSerializer",
     "DashboardFilterSerializer",
+    "EnrollResultSerializer",
     "EnrollRequestSerializer",
     "AvailableStudyGroupSerializer",
     "AvailableCourseClassSerializer",

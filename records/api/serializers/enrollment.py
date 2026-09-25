@@ -108,3 +108,21 @@ class EnrollmentSerializer(serializers.ModelSerializer):
                 "F":  stats['F'],
             },
         }
+
+class EnrollResultSerializer(serializers.ModelSerializer):
+    course_code = serializers.CharField(
+        source="course_class.course.code", 
+        read_only=True
+    )
+
+    class Meta:
+        model = Enrollment
+        fields = [
+            "id", 
+            "course_class_id", 
+            "course_code", 
+            "lecture_session_id", 
+            "tutorial_session_id", 
+            "lab_session_id", 
+            "created_at"
+        ]

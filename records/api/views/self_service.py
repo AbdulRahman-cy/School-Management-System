@@ -3,12 +3,13 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
-
+from records.api.serializers import enrollment 
 from academics.models import CourseClass
 from records.api.serializers import (
     AvailableStudyGroupSerializer,
     EnrollmentSerializer,
     EnrollRequestSerializer,
+    EnrollResultSerializer,
 )
 from records.api.serializers.LiveCapacitiesRequestSerializer import LiveCapacitiesRequestSerializer
 from records.models import Enrollment
@@ -71,7 +72,7 @@ class StudentEnrollmentViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        return Response(EnrollmentSerializer(enrollments, many=True).data, status=status.HTTP_201_CREATED)
+        return Response(EnrollResultSerializer(enrollments, many=True).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["get"], url_path="available-groups", permission_classes=[IsStudent])
     def available_groups(self, request: Request) -> Response:

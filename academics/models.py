@@ -179,6 +179,12 @@ class CourseClass(TimestampedModel):
             "(re)scheduled."
         ),
     )
+    
+    seats_taken = models.PositiveIntegerField(
+        default=0,
+        help_text="Denormalized ENROLLED count, kept in sync only by EnrollmentService's "
+                "atomic reserve/release. Don't write to this field anywhere else.",
+    )
 
     class Meta:
         constraints = [
