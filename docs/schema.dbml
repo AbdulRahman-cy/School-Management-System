@@ -1,0 +1,279 @@
+// University Management System (SIS) — database schema
+// Source of truth: the Django models in users/, academics/, scheduling/, records/.
+// Render or edit at https://dbdiagram.io
+
+Table BaseUser {
+  id bigint [pk]
+  email varchar [unique]
+  first_name varchar
+  last_name varchar
+  role varchar [note: 'ADMIN | TEACHER | STUDENT']
+  is_active boolean
+  is_staff boolean
+  is_superuser boolean
+  password varchar
+  last_login datetime
+  created_at datetime
+  updated_at datetime
+}
+
+Table StudentProfile {
+  id bigint [pk]
+  user_id bigint [ref: - BaseUser.id, not null, unique]
+  discipline_id bigint [ref: > Discipline.id]
+  enrollment_year int
+  cumulative_gpa decimal
+  is_active boolean
+  deleted_at datetime
+  created_at datetime
+  updated_at datetime
+}
+
+Table TeacherProfile {
+  id bigint [pk]
+  user_id bigint [ref: - BaseUser.id, not null, unique]
+  department_id bigint [ref: > Department.id]
+  rank varchar [note: 'TA | LECTURER | ASST_PROF | ASSOC_PROF | PROFESSOR']
+  is_active boolean
+  deleted_at datetime
+  created_at datetime
+  updated_at datetime
+}
+
+Table Department {
+  id bigint [pk]
+  code varchar [unique]
+  name varchar
+  created_at datetime
+  updated_at datetime
+}
+
+Table Discipline {
+  id bigint [pk]
+  department_id bigint [ref: - Department.id, not null, unique]
+  code varchar [unique]
+  name varchar
+  program_type varchar [note: 'GSP | SSP']
+  created_at datetime
+  updated_at datetime
+}
+
+Table Term {
+  id bigint [pk]
+  name varchar [unique]
+  season varchar [note: 'FALL | SPRING | SUMMER']
+  start_date date
+  end_date date
+  is_active boolean
+  created_at datetime
+  updated_at datetime
+}
+
+Table Course {
+  id bigint [pk]
+  department_id bigint [ref: > Department.id, not null]
+  code varchar [unique]
+  title varchar
+  credits int
+  course_type varchar [note: 'CORE | ELECTIVE']
+  lec_sessions int
+  tut_sessions int
+  lab_sessions int
+  created_at datetime
+  updated_at datetime
+}
+
+Table CoursePrerequisite {
+  id bigint [pk]
+  target_course_id bigint [ref: > Course.id, not null]
+  prerequisite_course_id bigint [ref: > Course.id, not null]
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (target_course_id, prerequisite_course_id) [unique, name: 'unique_prerequisite_mapping']
+  }
+}
+
+Table CurriculumBlueprint {
+  id bigint [pk]
+  discipline_id bigint [ref: > Discipline.id, not null]
+  course_id bigint [ref: > Course.id, not null]
+  year_level int
+  season varchar
+  is_mandatory boolean
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (discipline_id, course_id, year_level, season) [unique, name: 'unique_blueprint_course_per_semester']
+  }
+}
+
+Table Room {
+  id bigint [pk]
+  department_id bigint [ref: > Department.id, note: 'NULL = shared room, no department']
+  code varchar [unique]
+  name varchar
+  capacity int
+  room_type varchar [note: 'LECTURE | LAB | SEMINAR']
+  is_active boolean
+  created_at datetime
+  updated_at datetime
+}
+
+Table StudyGroup {
+  id bigint [pk]
+  discipline_id bigint [ref: > Discipline.id, not null]
+  term_id bigint [ref: > Term.id, not null]
+  year_level int
+  number int
+  capacity int
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (discipline_id, term_id, year_level, number) [unique, name: 'unique_study_group']
+  }
+
+  Note: 'A cohort is the virtual set of study groups sharing (discipline, term, year_level); it has no table.'
+}
+
+Table CourseClass {
+  id bigint [pk]
+  course_id bigint [ref: > Course.id, not null]
+  group_id bigint [ref: > StudyGroup.id, not null]
+  coordinator_id bigint [ref: > TeacherProfile.id, note: 'Teacher who gives the lecture']
+  capacity int
+  schedule_dirty boolean [note: 'Set when coordinator changes after scheduling']
+  seats_taken int [note: 'Denormalized ENROLLED count; written only by the atomic reserve/release in EnrollmentService']
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (course_id, group_id) [unique, name: 'unique_course_group']
+  }
+}
+
+Table Timeslot {
+  id bigint [pk]
+  day int [note: '0 = Saturday … 5 = Thursday']
+  period int [note: '1–5']
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (day, period) [unique, name: 'unique_timeslot']
+  }
+}
+
+Table Session {
+  id bigint [pk]
+  course_class_id bigint [ref: > CourseClass.id, not null]
+  room_id bigint [ref: > Room.id, not null]
+  timeslot_id bigint [ref: > Timeslot.id, not null]
+  session_type varchar [note: 'LECTURE | TUTORIAL | LAB']
+  created_at datetime
+  updated_at datetime
+}
+
+Table Enrollment {
+  id bigint [pk]
+  student_id bigint [ref: > StudentProfile.id, not null]
+  course_class_id bigint [ref: > CourseClass.id, not null]
+  lecture_session_id bigint [ref: > Session.id]
+  tutorial_session_id bigint [ref: > Session.id]
+  lab_session_id bigint [ref: > Session.id]
+  status varchar [note: 'ENROLLED | DROPPED | WITHDRAWN | COMPLETED']
+  final_percentage decimal [note: 'NULL until COMPLETED']
+  course_grade_points decimal [note: 'NULL until COMPLETED']
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (student_id, course_class_id) [unique, name: 'unique_student_enrollment', note: 'INCLUDE (id) — covering']
+    course_class_id [name: 'enrollment_active_by_class_idx', note: "Partial: WHERE status = 'ENROLLED'"]
+    student_id [name: 'enr_active_by_student_idx', note: "Partial: WHERE status = 'ENROLLED'"]
+  }
+}
+
+Table GradeEntry {
+  id bigint [pk]
+  enrollment_id bigint [ref: > Enrollment.id, not null]
+  component varchar
+  score decimal
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (enrollment_id, component) [unique, name: 'unique_grade_component_per_enrollment']
+    (enrollment_id, score) [name: 'idx_enrollment_score_cover']
+  }
+}
+
+Table AttendanceRecord {
+  id bigint [pk]
+  student_id bigint [ref: > StudentProfile.id, not null]
+  session_id bigint [ref: > Session.id, not null]
+  week int
+  status varchar [note: 'PRESENT | ABSENT | LATE | EXCUSED']
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (student_id, session_id, week) [unique, name: 'unique_attendance_per_session_week']
+  }
+}
+
+Table Exam {
+  id bigint [pk]
+  course_class_id bigint [ref: > CourseClass.id, not null]
+  exam_type varchar [note: 'MIDTERM | FINAL | PRACTICAL | QUIZ']
+  week int
+  max_score decimal
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (course_class_id, exam_type) [unique, name: 'unique_singular_exam_type_per_class', note: "Partial: WHERE exam_type IN ('FINAL', 'MIDTERM')"]
+  }
+}
+
+Table ExamResult {
+  id bigint [pk]
+  exam_id bigint [ref: > Exam.id, not null]
+  course_class_id bigint [ref: > CourseClass.id, note: 'Denormalized from exam; avoids a join on enrollment checks']
+  student_id bigint [ref: > StudentProfile.id, not null]
+  status varchar [note: 'PRESENT | ABSENT | EXCUSED | CHEATING']
+  score decimal
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (exam_id, student_id) [unique, name: 'unique_student_exam_result']
+  }
+}
+
+Table Assignment {
+  id bigint [pk]
+  course_class_id bigint [ref: > CourseClass.id, not null]
+  assignment_type varchar [note: 'HOMEWORK | PROJECT | ESSAY']
+  due_week int
+  max_points decimal
+  created_at datetime
+  updated_at datetime
+}
+
+Table StudentSubmission {
+  id bigint [pk]
+  student_id bigint [ref: > StudentProfile.id, not null]
+  assignment_id bigint [ref: > Assignment.id, not null]
+  score decimal
+  submitted_at datetime
+  created_at datetime
+  updated_at datetime
+
+  indexes {
+    (student_id, assignment_id) [unique, name: 'unique_student_assignment_submission']
+  }
+}
