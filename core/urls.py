@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.urls import include, path
-
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from core.admin_login import throttled_admin_login
 
 from users.api.views import (
@@ -21,6 +21,10 @@ urlpatterns = [
     path('api/auth/token/refresh/', CustomTokenRefreshView.as_view(),    name='token_refresh'),
     path('api/auth/logout/',        LogoutView.as_view(),                name='logout'),
     path('api/auth/me/',            MeView.as_view(),                    name='me'),
+
+    # OpenAPI Schema and UI endpoints
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 
     # App-specific CRUD
     path('api/academics/',  include('academics.api.urls')),

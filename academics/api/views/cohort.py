@@ -1,7 +1,9 @@
 from django.db import transaction, IntegrityError
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers as drf_serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer
+
 from academics.models import StudyGroup, CourseClass
 from academics.api.serializers import (
     CohortBulkCreateSerializer,
@@ -27,6 +29,24 @@ class CohortViewSet(viewsets.GenericViewSet):
     """
     permission_classes = [IsAdminOrReadOnly]
 
+    @extend_schema(
+        methods=["GET"],
+        summary="List all cohorts",
+        description="Retrieves a list of cohorts grouped by discipline, term, and year level.",
+        parameters=[
+            OpenApiParameter("term_status", OpenApiTypes.STR, description="Filter by term status (active, past, all)", default="active"),
+            OpenApiParameter("discipline_id", OpenApiTypes.INT, description="Filter by discipline ID"),
+            OpenApiParameter("discipline", OpenApiTypes.INT, description="Alias for discipline_id"),
+        ],
+        responses={200: CohortReadSerializer(many=True)}
+    )
+    @extend_schema(
+        methods=["DELETE"],
+        summary="Delete a cohort",
+        description="Deletes all study groups and associated course classes for the specified cohort.",
+        parameters=[CohortIdentifierSerializer], # Parses query params
+        responses={204: None, 404: OpenApiTypes.OBJECT}
+    )
     @action(detail=False, methods=["get", "delete"], url_path="cohorts")
     def cohorts(self, request):
         if request.method == "DELETE":
@@ -71,11 +91,7 @@ class CohortViewSet(viewsets.GenericViewSet):
         for cohort in cohort_map.values():
             classes = cohort["course_classes"]
             scheduled_count = sum(1 for cc in classes if cc.id in scheduled_class_ids)
-            # "needs_reschedule" covers two distinct cases: a class was added/removed
-            # since the last run (partial coverage), or every class still has sessions
-            # but one was flagged dirty (its coordinator changed after being scheduled —
-            # see CourseClass.schedule_dirty). Both mean the existing sessions no longer
-            # reflect what should actually be scheduled.
+            
             if scheduled_count == 0:
                 cohort["schedule_status"] = "unscheduled"
             elif scheduled_count < len(classes) or any(cc.schedule_dirty for cc in classes):
@@ -100,6 +116,23 @@ class CohortViewSet(viewsets.GenericViewSet):
         study_groups.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @extend_schema(
+        summary="Bulk create a cohort",
+        description="Atomically creates all StudyGroup and CourseClass instances for a new cohort.",
+        request=CohortBulkCreateSerializer,
+        responses={
+            201: inline_serializer(
+                name='BulkCreateCohortResponse',
+                fields={
+                    'message': drf_serializers.CharField(),
+                    'groups_created': drf_serializers.IntegerField(),
+                    'classes_created': drf_serializers.IntegerField(),
+                    'group_ids': drf_serializers.ListField(child=drf_serializers.IntegerField()),
+                    'class_ids': drf_serializers.ListField(child=drf_serializers.IntegerField()),
+                }
+            )
+        }
+    )
     @action(detail=False, methods=["post"], url_path="bulk-cohort")
     def bulk_create_cohort(self, request):
         serializer = CohortBulkCreateSerializer(data=request.data)
@@ -116,6 +149,20 @@ class CohortViewSet(viewsets.GenericViewSet):
             status=status.HTTP_201_CREATED
         )
 
+    @extend_schema(
+        summary="Add a study group to an existing cohort",
+        request=AddStudyGroupRequestSerializer,
+        responses={
+            201: inline_serializer(
+                name='AddStudyGroupResponse',
+                fields={
+                    'message': drf_serializers.CharField(),
+                    'id': drf_serializers.IntegerField(),
+                }
+            ),
+            409: OpenApiTypes.OBJECT,
+        }
+    )
     @action(detail=False, methods=["post"], url_path="add-group")
     def add_study_group_to_cohort(self, request):
         serializer = AddStudyGroupRequestSerializer(data=request.data)
@@ -137,10 +184,7 @@ class CohortViewSet(viewsets.GenericViewSet):
                     .values_list("course_id", flat=True)
                     .distinct()
                 )
-                # bulk_create() never calls CourseClass.save(), so the "inherit
-                # capacity from the group" default it normally applies has to be
-                # supplied explicitly here — otherwise capacity ships as NULL and
-                # violates the NOT NULL constraint.
+                
                 CourseClass.objects.bulk_create([
                     CourseClass(course_id=cid, group=study_group, coordinator=None, capacity=study_group.capacity)
                     for cid in course_ids
@@ -158,6 +202,25 @@ class CohortViewSet(viewsets.GenericViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @extend_schema(
+        summary="Schedule a cohort",
+        description="Runs the CP-SAT solver to generate a conflict-free timetable for the cohort.",
+        request=ScheduleCohortRequestSerializer,
+        responses={
+            201: ScheduleCohortResponseSerializer,
+            200: ScheduleCohortResponseSerializer, # Returned on dry runs
+            409: inline_serializer(
+                name="RescheduleConfirmationResponse",
+                fields={
+                    "detail": drf_serializers.CharField(),
+                    "requires_confirmation": drf_serializers.BooleanField(),
+                    "stale_session_count": drf_serializers.IntegerField(),
+                    "affected_enrollment_count": drf_serializers.IntegerField(),
+                }
+            ),
+            400: OpenApiTypes.OBJECT
+        }
+    )
     @action(detail=False, methods=["post"], url_path="schedule-cohort")
     def schedule_cohort(self, request):
         serializer = ScheduleCohortRequestSerializer(data=request.data)
@@ -175,9 +238,6 @@ class CohortViewSet(viewsets.GenericViewSet):
         try:
             result = service.run(dry_run=data.get("dry_run", False))
         except RescheduleConfirmationRequiredError as exc:
-            # Structured, not just a prose message: lets the frontend build its own
-            # copy and choose a confirmation tone instead of pattern-matching on
-            # "Pass force=true to proceed" inside a backend-authored string.
             return Response(
                 {
                     "detail": str(exc),
