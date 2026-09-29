@@ -1,6 +1,3 @@
-
-
-
 <div align="center">
 
 # University Management System (SIS)
@@ -8,9 +5,10 @@
 A full-stack Student Information System that runs academics, enrollment, and academic records for a university, with timetables generated automatically by a CP-SAT constraint solver.
 Built on Django REST Framework and React + TypeScript, containerized with Docker, and deployed on auto-scaling AWS infrastructure.
 
+Tested against a seeded dataset of **10,000 students, 134,615 enrollments, 10,521 scheduled sessions and 400,000+ exam results**.
+
 <br>
 
-<!-- Demo video: on GitHub, drag the .mp4 into this README in the web editor to get an embeddable link, then replace the line below. -->
 https://github.com/user-attachments/assets/ff76001a-bb46-49aa-8835-c0ad63ce9137
 
 </div>
@@ -21,8 +19,8 @@ https://github.com/user-attachments/assets/ff76001a-bb46-49aa-8835-c0ad63ce9137
 
 | Resource | Link |
 | --- | --- |
-| **Live Demo** | [Insert Live Demo URL] |
 | **Database & Authentication Design** (75-slide presentation) | [School_Management_Sys_Db&Auth_presentation.pdf](School_Management_Sys_Db%26Auth_presentation.pdf) |
+| **Database Schema** (21 tables, every constraint and index) | [docs/](docs/): interactive diagram, PNG, and DBML source |
 | **OpenAPI 3 Schema** | [openapi.json](openapi.json) · interactive Swagger UI at `http://localhost/api/docs/` when running locally |
 | **Production Architecture Diagram** | [sis-production-architecture-v3.drawio.png](sis-production-architecture-v3.drawio.png) |
 
@@ -115,7 +113,7 @@ flowchart LR
 
 ### Domain model
 
-Simplified to the core relationships; the full schema is covered in the [design presentation](School_Management_Sys_Db%26Auth_presentation.pdf).
+Simplified to the core relationships. The full schema, with every constraint, index and the dataset's row counts, is in [docs/](docs/).
 
 ```mermaid
 erDiagram
