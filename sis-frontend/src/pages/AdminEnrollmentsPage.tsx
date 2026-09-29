@@ -5,6 +5,7 @@ import {
 } from "../api";
 import type { AvailableStudyGroup, AvailableCourseClass } from "../api";
 import { ToastContainer } from "../components/Toast";
+import { CourseTitle, EnrolledBadge } from "../components/CourseClassHeader";
 import type { ToastMessage } from "../components/Toast";
 import { parseEnrollError } from "../utils/enrollErrors";
 import { getCourseColorTheme } from "../courseColors";
@@ -73,21 +74,18 @@ function AdminCourseClassCard({
   }
 
   return (
-    <div style={{ background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 12, padding: "13px 15px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+    <div style={{
+      background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 12, padding: "13px 15px",
+      boxShadow: cc.is_enrolled ? "inset 3px 0 0 #22c55e" : "none",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <CourseCodePill code={cc.course_code} />
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1e1b4b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cc.course_title}</span>
+          {cc.is_enrolled && <EnrolledBadge />}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
           {cc.is_enrolled ? (
             <>
-              <span style={{
-                fontSize: 10.5, fontWeight: 700, padding: "3px 10px", borderRadius: 99,
-                background: "#dcfce7", color: "#15803d", border: "1px solid #bbf7d0", whiteSpace: "nowrap",
-              }}>
-                ✔ Enrolled
-              </span>
               <button
                 onClick={handleUnenroll}
                 disabled={isUnenrolling}
@@ -122,9 +120,7 @@ function AdminCourseClassCard({
           ) : null}
         </div>
       </div>
-      {cc.coordinator_name && (
-        <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 6 }}>{cc.coordinator_name}</div>
-      )}
+      <CourseTitle title={cc.course_title} coordinator={cc.coordinator_name} />
     </div>
   );
 }

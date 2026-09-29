@@ -21,7 +21,7 @@ import type { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axio
 
 export type UserRole = 'STUDENT' | 'TEACHER' | 'ADMIN';
 
-/** Shape returned by GET /api/auth/me/ — also returned by login() and register(). */
+/** Shape returned by GET /api/auth/me/ — also returned by login(). */
 export interface AuthUser {
   id:         number;
   email:      string;
@@ -34,15 +34,6 @@ export interface AuthUser {
 export interface LoginPayload {
   email:    string;
   password: string;
-}
-
-export interface RegisterPayload {
-  email:      string;
-  first_name: string;
-  last_name:  string;
-  role:       Exclude<UserRole, 'ADMIN'>;
-  password:   string;
-  password2:  string;
 }
 
 export type DjangoFieldErrors = Record<string, string | string[]>;
@@ -75,10 +66,22 @@ export function parseDjangoErrors(data: DjangoFieldErrors): ParsedFieldErrors {
 // ─── Axios Instances ───────────────────────────────────────────────────────────
 
 /**
+ * CSRF: the backend rejects cookie-authenticated POST/PUT/PATCH/DELETE unless
+ * the request echoes Django's `csrftoken` cookie (set by /api/auth/me/) in an
+ * X-CSRFToken header. axios does that automatically for same-origin requests
+ * once it knows Django's cookie/header names.
+ */
+const CSRF_CONFIG = {
+  xsrfCookieName: 'csrftoken',
+  xsrfHeaderName: 'X-CSRFToken',
+} as const;
+
+/**
  * authApi — for /api/auth/* lifecycle endpoints only.
  * No interceptors: a 401 during refresh must NOT trigger another refresh.
  */
 const authApi: AxiosInstance = axios.create({
+  ...CSRF_CONFIG,
   baseURL:         '/api/auth',
   withCredentials: true,
   headers:         { 'Content-Type': 'application/json' },
@@ -89,6 +92,7 @@ const authApi: AxiosInstance = axios.create({
  * Cookies are attached by the browser; no Authorization header needed.
  */
 export const apiClient: AxiosInstance = axios.create({
+  ...CSRF_CONFIG,
   baseURL:         '/api',
   withCredentials: true,
   headers:         { 'Content-Type': 'application/json' },
@@ -133,16 +137,6 @@ export async function login(payload: LoginPayload): Promise<AuthUser> {
   } catch (err) {
     const e = err as AxiosError<DjangoFieldErrors>;
     throw parseDjangoErrors(e.response?.data ?? { detail: 'Login failed.' });
-  }
-}
-
-export async function register(payload: RegisterPayload): Promise<AuthUser> {
-  try {
-    await authApi.post('/register/', payload);
-    return await me();
-  } catch (err) {
-    const e = err as AxiosError<DjangoFieldErrors>;
-    throw parseDjangoErrors(e.response?.data ?? { detail: 'Registration failed.' });
   }
 }
 

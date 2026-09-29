@@ -4,7 +4,8 @@
  * Ibn al-Hitham University Portal — Authentication Page
  *
  * After cookie-auth refactor:
- *  • login()/register() return an AuthUser (via /api/auth/me/)
+ *  • login() returns an AuthUser (via /api/auth/me/)
+ *  • Sign-in only: accounts are issued by university staff (no public sign-up)
  *  • This component passes the user up via onLoginSuccess
  *  • No tokens are ever handled in JS
  */
@@ -12,15 +13,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   login,
-  register,
   type ParsedFieldErrors,
-  type UserRole,
   type AuthUser,
 } from '../api/auth';
+import { ComingSoon } from '../components/ComingSoon';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
-
-type Mode = 'signin' | 'register';
 
 interface FieldProps {
   icon: string;
@@ -219,64 +217,6 @@ function Label({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ─── Role Selector ────────────────────────────────────────────────────────────
-
-function RoleSelect({
-  value,
-  onChange,
-  error,
-}: {
-  value: UserRole;
-  onChange: (v: UserRole) => void;
-  error?: string;
-}) {
-  const [focused, setFocused] = useState(false);
-  const hasError = Boolean(error);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <div style={{ position: 'relative' }}>
-        <span style={{
-          position: 'absolute', left: 14, top: '50%',
-          transform: 'translateY(-50%)', fontSize: 14, pointerEvents: 'none',
-          opacity: focused ? 1 : 0.45,
-        }}>🎓</span>
-
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value as UserRole)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          style={{
-            width: '100%', boxSizing: 'border-box',
-            padding: '11px 38px 11px 42px', borderRadius: 10,
-            border: `1.5px solid ${hasError ? '#fca5a5' : focused ? '#7c3aed' : '#e8e3f8'}`,
-            background: focused ? '#faf7ff' : '#f8f6ff',
-            fontFamily: "'Sora', sans-serif", fontSize: 13, color: '#1e1b4b',
-            outline: 'none', appearance: 'none', cursor: 'pointer',
-            transition: 'border-color 0.2s, box-shadow 0.2s',
-            boxShadow: focused ? '0 0 0 3px rgba(124,58,237,0.1)' : 'none',
-          }}
-        >
-          <option value="STUDENT">Student</option>
-          <option value="TEACHER">Teacher / Lecturer</option>
-        </select>
-
-        <span style={{
-          position: 'absolute', right: 14, top: '50%',
-          transform: 'translateY(-50%)', pointerEvents: 'none',
-          fontSize: 10, opacity: 0.4, color: '#1e1b4b',
-        }}>▾</span>
-      </div>
-      {hasError && (
-        <div style={{ fontSize: 11, color: '#dc2626', fontFamily: "'Sora', sans-serif", paddingLeft: 4 }}>
-          ⚠ {error}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── General Error Banner (non-field errors) ──────────────────────────────────
 
 function ErrorBanner({ message }: { message?: string }) {
@@ -330,13 +270,7 @@ function PrimaryButton({
 
 // ─── Sign-In Form ─────────────────────────────────────────────────────────────
 
-function SignInForm({
-  onSwitch,
-  onSuccess,
-}: {
-  onSwitch: () => void;
-  onSuccess: (user: AuthUser) => void;
-}) {
+function SignInForm({ onSuccess }: { onSuccess: (user: AuthUser) => void }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -388,12 +322,14 @@ function SignInForm({
           autoComplete="current-password"
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
-          <button style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: 11, color: '#7c3aed', fontFamily: "'Sora', sans-serif", fontWeight: 600, padding: 0,
-          }}>
-            Forgot password?
-          </button>
+          <ComingSoon>
+            <button type="button" disabled aria-disabled="true" style={{
+              background: 'none', border: 'none',
+              fontSize: 11, color: '#cbd5e1', fontFamily: "'Sora', sans-serif", fontWeight: 600, padding: 0,
+            }}>
+              Forgot password?
+            </button>
+          </ComingSoon>
         </div>
       </div>
 
@@ -405,232 +341,29 @@ function SignInForm({
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ flex: 1, height: 1, background: '#ede9fe' }} />
-        <span style={{ fontSize: 11, color: '#a78bfa', fontFamily: "'Sora',sans-serif" }}>or continue with</span>
+        <span style={{ fontSize: 11, color: '#a78bfa', fontFamily: "'Sora',sans-serif" }}>or</span>
         <div style={{ flex: 1, height: 1, background: '#ede9fe' }} />
       </div>
 
-      <div style={{ display: 'flex', gap: 10 }}>
-        {([
-          {
-            label: 'Google',
-            icon: (
-              <svg width="16" height="16" viewBox="0 0 24 24">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-              </svg>
-            ),
-          },
-          {
-            label: 'GitHub',
-            icon: (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="#1e1b4b">
-                <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/>
-              </svg>
-            ),
-          },
-        ] as const).map(({ label, icon }) => (
-          <button
-            key={label}
-            type="button"
-            style={{
-              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-              padding: '10px', borderRadius: 10, border: '1.5px solid #ede9fe',
-              background: '#faf8ff', cursor: 'pointer', fontFamily: "'Sora', sans-serif",
-              fontSize: 12, fontWeight: 600, color: '#1e1b4b', transition: 'all 0.2s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = '#c4b5fd';
-              e.currentTarget.style.background  = '#f3f0ff';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = '#ede9fe';
-              e.currentTarget.style.background  = '#faf8ff';
-            }}
-          >
-            {icon}{label}
-          </button>
-        ))}
-      </div>
-
-      <p style={{ textAlign: 'center', fontSize: 12, color: '#94a3b8', fontFamily: "'Sora', sans-serif", margin: 0 }}>
-        New to the portal?{' '}
-        <button onClick={onSwitch} style={{
-          background: 'none', border: 'none', cursor: 'pointer',
-          color: '#7c3aed', fontWeight: 700, fontSize: 12,
-          fontFamily: "'Sora', sans-serif", padding: 0,
-        }}>
-          Create an account
+      <ComingSoon block placement="top">
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            padding: '11px', borderRadius: 10, border: '1.5px solid #e2e8f0',
+            background: '#f1f5f9', color: '#94a3b8', fontFamily: "'Sora', sans-serif",
+            fontSize: 12.5, fontWeight: 600, letterSpacing: '0.2px',
+          }}
+        >
+          <span style={{ fontSize: 14, filter: 'grayscale(1)', opacity: 0.7 }}>🏛</span>
+          University SSO Login
         </button>
-      </p>
-    </div>
-  );
-}
+      </ComingSoon>
 
-// ─── Register Form ────────────────────────────────────────────────────────────
-
-function RegisterForm({
-  onSwitch,
-  onSuccess,
-}: {
-  onSwitch: () => void;
-  onSuccess: (user: AuthUser) => void;
-}) {
-  const [form, setForm] = useState({
-    firstName: '', lastName: '', email: '',
-    password: '', password2: '', role: 'STUDENT' as Exclude<UserRole, 'ADMIN'>,
-  });
-  const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading]   = useState(false);
-  const [errors, setErrors]     = useState<ParsedFieldErrors>({ _general: '' });
-  const [strength, setStrength] = useState(0);
-
-  const update = useCallback(<K extends keyof typeof form>(field: K) => (val: typeof form[K]) => {
-    setForm((f) => ({ ...f, [field]: val }));
-    if (field === 'password') setStrength(calcStrength(val as string));
-  }, []);
-
-  function calcStrength(pw: string): number {
-    return (
-      (pw.length >= 8 ? 1 : 0) +
-      (/[A-Z]/.test(pw) ? 1 : 0) +
-      (/[0-9]/.test(pw) ? 1 : 0) +
-      (/[^a-zA-Z0-9]/.test(pw) ? 1 : 0)
-    );
-  }
-
-  const strengthMeta = [
-    null,
-    { label: 'Weak',   color: '#ef4444' },
-    { label: 'Fair',   color: '#f59e0b' },
-    { label: 'Good',   color: '#10b981' },
-    { label: 'Strong', color: '#059669' },
-  ] as const;
-
-  const handleSubmit = useCallback(async () => {
-    setErrors({ _general: '' });
-
-    const clientErrors: ParsedFieldErrors = { _general: '' };
-    if (!form.firstName.trim()) clientErrors.first_name = 'First name is required.';
-    if (!form.lastName.trim())  clientErrors.last_name  = 'Last name is required.';
-    if (!form.email.trim())     clientErrors.email      = 'Email is required.';
-    if (!form.password)         clientErrors.password   = 'Password is required.';
-    if (!form.password2)        clientErrors.password2  = 'Please confirm your password.';
-    if (form.password && form.password2 && form.password !== form.password2)
-      clientErrors.password2 = 'Passwords do not match.';
-    if (strength < 2 && form.password)
-      clientErrors.password = 'Password is too weak. Add uppercase, numbers, or symbols.';
-
-    if (Object.keys(clientErrors).filter((k) => k !== '_general').length > 0) {
-      setErrors(clientErrors); return;
-    }
-
-    setLoading(true);
-    try {
-      const user = await register({
-        email:      form.email.trim(),
-        first_name: form.firstName.trim(),
-        last_name:  form.lastName.trim(),
-        role:       form.role,
-        password:   form.password,
-        password2:  form.password2,
-      });
-      onSuccess(user);
-    } catch (err) {
-      setErrors(err as ParsedFieldErrors);
-    } finally {
-      setLoading(false);
-    }
-  }, [form, strength, onSuccess]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <div>
-          <Label>First name</Label>
-          <Field icon="👤" placeholder="Ahmed" value={form.firstName}
-            onChange={update('firstName')} error={errors.first_name} autoComplete="given-name" />
-        </div>
-        <div>
-          <Label>Last name</Label>
-          <Field icon="👤" placeholder="Hassan" value={form.lastName}
-            onChange={update('lastName')} error={errors.last_name} autoComplete="family-name" />
-        </div>
-      </div>
-
-      <div>
-        <Label>University email</Label>
-        <Field icon="✉" type="email"
-          placeholder="s12345678@student.ibnh.edu.eg"
-          value={form.email} onChange={update('email')}
-          error={errors.email} autoComplete="email" />
-      </div>
-
-      <div>
-        <Label>Role</Label>
-        <RoleSelect value={form.role} onChange={(v) => setForm(f => ({ ...f, role: v as Exclude<typeof v, 'ADMIN'> }))} error={errors.role} />
-      </div>
-
-      <div>
-        <Label>Password</Label>
-        <Field
-          icon="🔒" type={showPass ? 'text' : 'password'}
-          placeholder="Min. 8 characters"
-          value={form.password} onChange={update('password')}
-          error={errors.password}
-          action={{ icon: showPass ? '🙈' : '👁', onClick: () => setShowPass((s) => !s) }}
-          autoComplete="new-password"
-        />
-        {form.password.length > 0 && (
-          <div style={{ marginTop: 7 }}>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {[1, 2, 3, 4].map((n) => (
-                <div key={n} style={{
-                  flex: 1, height: 3, borderRadius: 99, transition: 'background 0.3s',
-                  background: n <= strength ? (strengthMeta[strength]?.color ?? '#ede9fe') : '#ede9fe',
-                }} />
-              ))}
-            </div>
-            {strengthMeta[strength] && (
-              <span style={{
-                fontSize: 10, fontWeight: 700, display: 'block', marginTop: 4,
-                color: strengthMeta[strength].color, fontFamily: "'Sora', sans-serif",
-              }}>
-                {strengthMeta[strength].label}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div>
-        <Label>Confirm password</Label>
-        <Field
-          icon="🔑" type={showPass ? 'text' : 'password'}
-          placeholder="Repeat your password"
-          value={form.password2} onChange={update('password2')}
-          error={errors.password2}
-          autoComplete="new-password"
-        />
-      </div>
-
-      <ErrorBanner message={errors._general} />
-
-      <PrimaryButton loading={loading} onClick={handleSubmit}>
-        {loading ? 'Creating account…' : 'Create Account'}
-      </PrimaryButton>
-
-      <p style={{ textAlign: 'center', fontSize: 12, color: '#94a3b8', fontFamily: "'Sora', sans-serif", margin: 0 }}>
-        Already have an account?{' '}
-        <button onClick={onSwitch} style={{
-          background: 'none', border: 'none', cursor: 'pointer',
-          color: '#7c3aed', fontWeight: 700, fontSize: 12,
-          fontFamily: "'Sora', sans-serif", padding: 0,
-        }}>
-          Sign in
-        </button>
+      <p style={{ textAlign: 'center', fontSize: 11.5, color: '#94a3b8', fontFamily: "'Sora', sans-serif", margin: 0, lineHeight: 1.5 }}>
+        Accounts are issued by the registrar's office.
       </p>
     </div>
   );
@@ -643,20 +376,12 @@ interface AuthPageProps {
 }
 
 export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
-  const [mode, setMode]       = useState<Mode>('signin');
-  const [animOut, setAnimOut] = useState(false);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 30);
     return () => clearTimeout(t);
   }, []);
-
-  const switchMode = (next: Mode) => {
-    if (next === mode) return;
-    setAnimOut(true);
-    setTimeout(() => { setMode(next); setAnimOut(false); }, 220);
-  };
 
   const handleSuccess = (user: AuthUser) => {
     onLoginSuccess(user);
@@ -670,7 +395,6 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         @keyframes fadeUp      { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
-        @keyframes formOut     { from { opacity:1; transform:translateY(0);     } to { opacity:0; transform:translateY(-10px); } }
         @keyframes formIn      { from { opacity:0; transform:translateY(10px);  } to { opacity:1; transform:translateY(0); } }
         @keyframes spin        { to { transform: rotate(360deg); } }
         @keyframes fadeSlideIn { from { opacity:0; transform:translateY(-4px);  } to { opacity:1; transform:translateY(0); } }
@@ -711,27 +435,6 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
         }
 
         .form-inner { animation: formIn 0.25s ease forwards; }
-        .form-inner.out { animation: formOut 0.22s ease forwards; }
-
-        .tab-bar {
-          display: flex;
-          background: #f5f3ff;
-          border: 1.5px solid #ede9fe;
-          border-radius: 12px;
-          padding: 4px;
-          margin-bottom: 28px;
-          width: 100%;
-        }
-
-        .tab-btn {
-          flex: 1; padding: 8px 0;
-          border: none; border-radius: 9px; cursor: pointer;
-          font-family: 'Sora', sans-serif; font-size: 12px; font-weight: 600;
-          transition: all 0.2s;
-        }
-        .tab-btn.active   { background: #7c3aed; color: #fff; box-shadow: 0 2px 10px rgba(124,58,237,0.3); }
-        .tab-btn.inactive { background: transparent; color: #94a3b8; }
-        .tab-btn.inactive:hover { color: #7c3aed; }
 
         .info-card {
           background: rgba(255,255,255,0.07);
@@ -777,37 +480,17 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
 
           <div style={{ width: '100%', maxWidth: 380, animation: 'fadeUp 0.5s ease 0.2s both' }}>
 
-            <div className="tab-bar">
-              {([
-                { key: 'signin',   label: 'Sign In'        },
-                { key: 'register', label: 'Create Account' },
-              ] as { key: Mode; label: string }[]).map(({ key, label }) => (
-                <button
-                  key={key}
-                  className={`tab-btn ${mode === key ? 'active' : 'inactive'}`}
-                  onClick={() => switchMode(key)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
             <div style={{ marginBottom: 22 }}>
               <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1e1b4b', letterSpacing: '-0.5px' }}>
-                {mode === 'signin' ? 'Welcome back' : 'Join the portal'}
+                Welcome back
               </h1>
               <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 5 }}>
-                {mode === 'signin'
-                  ? 'Sign in to access your academic dashboard.'
-                  : 'Create your account to get started today.'}
+                Sign in to access your academic dashboard.
               </p>
             </div>
 
-            <div className={`form-inner${animOut ? ' out' : ''}`}>
-              {mode === 'signin'
-                ? <SignInForm  onSwitch={() => switchMode('register')} onSuccess={handleSuccess} />
-                : <RegisterForm onSwitch={() => switchMode('signin')}  onSuccess={handleSuccess} />
-              }
+            <div className="form-inner">
+              <SignInForm onSuccess={handleSuccess} />
             </div>
           </div>
 
@@ -828,10 +511,10 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
           <div style={{ position: 'relative', animation: 'fadeUp 0.6s ease 0.3s both' }}>
             <IbnLogo size={42} inverted />
             <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.9)', marginTop: 12 }}>
-              Alexanderia Faculty of Engineering
+              Alexandria Faculty of Engineering
             </div>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(196,181,253,0.7)', letterSpacing: '2px', textTransform: 'uppercase', marginTop: 3 }}>
-              Alexanderia, Egypt · Est. 1942
+              Alexandria, Egypt · Est. 1942
             </div>
           </div>
 

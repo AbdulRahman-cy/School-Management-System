@@ -1,4 +1,4 @@
-from rest_framework import viewsets
+from rest_framework import status, viewsets
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from rest_framework.decorators import action
@@ -10,9 +10,10 @@ from records.api.serializers import (
     DashboardFilterSerializer,
 )
 from users.api.permissions import IsAdminOrReadOnly
+from users.api.scoping import RoleScopedQuerysetMixin
 
 
-class EnrollmentViewSet(viewsets.ModelViewSet):
+class EnrollmentViewSet(RoleScopedQuerysetMixin, viewsets.ModelViewSet):
     """
     API endpoint that allows Enrollments to be viewed or edited.
     """
@@ -23,7 +24,10 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     filterset_fields = ['student', 'course_class']
     ordering_fields = ['created_at']
 
-    def get_queryset(self):
+    student_owner_lookup = "student__user_id"
+    # Admin ?student= filtering is handled by DjangoFilterBackend (filterset_fields).
+
+    def get_base_queryset(self):
         queryset = Enrollment.objects.select_related(
             'student',
             'course_class'
@@ -49,6 +53,20 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
         student_id = param_serializer.validated_data['student']
         term_status = param_serializer.validated_data.get('term_status')
+
+        user = request.user
+        if user.role == "STUDENT":
+            student_profile = getattr(user, "student_profile", None)
+            if student_profile is None or student_profile.id != student_id:
+                return Response(
+                    {"detail": "You do not have permission to view this student's enrollments."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        elif user.role != "ADMIN":
+            return Response(
+                {"detail": "You do not have permission to perform this action."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         queryset = Enrollment.objects.filter(
             student_id=student_id

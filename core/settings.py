@@ -139,6 +139,34 @@ REST_FRAMEWORK = {
         'users.api.authentication.JWTCookieAuthentication',
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+
+    # Every list endpoint returns {count, next, previous, results}.
+    'DEFAULT_PAGINATION_CLASS': 'core.pagination.StandardPagination',
+
+    # Throttle state lives in the default cache. With no CACHES configured that
+    # is per-process LocMemCache, so each gunicorn worker counts separately
+    # (effective limit = rate x workers) and counters reset on restart. Point
+    # CACHES at Redis for exact, shared limits.
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        # Per IP. Kept generous because a whole campus can share one NAT IP;
+        # brute force is handled per-account by the 'login' scope below.
+        'anon':  env('THROTTLE_RATE_ANON',  default='100/minute'),
+        # Per user. The enrollment page polls live-capacities every 5 s (12/min).
+        'user':  env('THROTTLE_RATE_USER',  default='300/minute'),
+        # Per target email on the login endpoint (users.api.throttling).
+        'login': env('THROTTLE_RATE_LOGIN', default='5/minute'),
+        # Django admin login POSTs, per IP and per username (core.admin_login).
+        'admin_login': env('THROTTLE_RATE_ADMIN_LOGIN', default='5/minute'),
+    },
+    # nginx sits in front of gunicorn and appends the client IP to
+    # X-Forwarded-For. Without this, every anonymous client would be throttled
+    # as the nginx container's IP; with it, DRF trusts only the last hop nginx
+    # added, so a client-supplied X-Forwarded-For can't spoof its identity.
+    'NUM_PROXIES': env.int('DRF_NUM_PROXIES', default=1),
 }
 
 # ─── SimpleJWT ────────────────────────────────────────────────────────────────

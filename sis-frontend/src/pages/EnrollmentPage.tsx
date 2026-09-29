@@ -3,6 +3,7 @@ import { useAvailableGroups, useLiveCapacities, useEnroll, useUnenroll, isGradua
 import type { AvailableStudyGroup, AvailableCourseClass, SessionDetail, LiveCapacityEntry, LiveCapacitiesResponse } from "../api";
 import { getCourseColorTheme } from "../courseColors";
 import { ToastContainer } from "../components/Toast";
+import { CourseTitle, EnrolledBadge } from "../components/CourseClassHeader";
 import type { ToastMessage } from "../components/Toast";
 import { parseEnrollError } from "../utils/enrollErrors";
 
@@ -177,13 +178,19 @@ function CourseClassCardImpl({
   }
 
   return (
-    <div style={{ background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 12, padding: "13px 15px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0, marginBottom: cc.coordinator_name ? 3 : 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+    <div style={{
+      background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 12, padding: "13px 15px",
+      // Enrolled classes get a green accent so they're scannable at a glance.
+      boxShadow: cc.is_enrolled ? "inset 3px 0 0 #22c55e" : "none",
+    }}>
+      {/* Row 1: code + enrolled status on the left, seats + action on the right.
+          Wraps instead of squeezing when the card is narrow. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <CourseCodePill code={cc.course_code} />
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1e1b4b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cc.course_title}</span>
+          {cc.is_enrolled && <EnrolledBadge />}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
           {isScheduled && (
             liveCapacity
               ? <CapacityBadge remaining={liveCapacity.remaining} capacity={liveCapacity.capacity} isFull={isFull} />
@@ -191,12 +198,6 @@ function CourseClassCardImpl({
           )}
           {cc.is_enrolled ? (
             <>
-              <span style={{
-                fontSize: 10.5, fontWeight: 700, padding: "3px 10px", borderRadius: 99,
-                background: "#dcfce7", color: "#15803d", border: "1px solid #bbf7d0", whiteSpace: "nowrap",
-              }}>
-                ✔ Enrolled
-              </span>
               <button
                 onClick={handleClassUnenroll}
                 disabled={isUnenrolling}
@@ -242,10 +243,8 @@ function CourseClassCardImpl({
           ) : null}
         </div>
       </div>
-      {cc.coordinator_name && (
-        <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 8 }}>{cc.coordinator_name}</div>
-      )}
-      <div>
+      <CourseTitle title={cc.course_title} coordinator={cc.coordinator_name} />
+      <div style={{ marginTop: 8 }}>
         <SessionRow label="Lecture"  session={cc.lecture}   isLast={false} />
         <SessionRow label="Tutorial" session={cc.tutorial}  isLast={false} />
         <SessionRow label="Lab"      session={cc.lab}       isLast={true}  />

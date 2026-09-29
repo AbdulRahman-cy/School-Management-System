@@ -12,6 +12,7 @@ import WeeklyTimetable from "./WeeklyTimetable";
 import TeacherTimetable from "./TeacherTimetable";
 import { DAY_LABELS, PERIOD_LABELS, getAlexDay } from "./timetableUtils";
 import { useAuth } from '../context/AuthContext';
+import { ComingSoon } from "../components/ComingSoon";
 
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -100,45 +101,6 @@ function RadialProgress({ value, color, size = 50 }: { value: number; color: str
 }
 
 
-// ─── Command palette ──────────────────────────────────────────────────────────
-
-const CMD_SUGGESTIONS = ["View timetable", "Check attendance", "Download student card", "View exam schedule", "Pay registration fees"];
-
-function CommandPalette({ onClose }: { onClose: () => void }) {
-  const [query, setQuery] = useState("");
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [onClose]);
-  const filtered = CMD_SUGGESTIONS.filter(s => s.toLowerCase().includes(query.toLowerCase()));
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(15,10,30,0.55)", backdropFilter: "blur(6px)", display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "12vh" }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ width: "100%", maxWidth: 520, background: "#fff", borderRadius: 14, boxShadow: "0 32px 80px rgba(100,50,255,0.18)", border: "1px solid rgba(124,58,237,0.12)", overflow: "hidden" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 16px", borderBottom: "1px solid #f0eeff" }}>
-          <span style={{ fontSize: 16, opacity: 0.35 }}>⌕</span>
-          <input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search portal…"
-            style={{ flex: 1, border: "none", outline: "none", fontSize: 14, fontFamily: "inherit", color: "#1e1b4b", background: "transparent" }} />
-          <kbd style={{ fontSize: 10, padding: "2px 6px", borderRadius: 5, background: "#f3f0ff", color: "#7c3aed", border: "1px solid #ddd6fe", fontFamily: "inherit" }}>ESC</kbd>
-        </div>
-        <div style={{ maxHeight: 280, overflowY: "auto" }}>
-          {filtered.length === 0
-            ? <div style={{ padding: "22px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No results</div>
-            : filtered.map((s, i) => (
-                <div key={i} style={{ padding: "11px 18px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#374151", cursor: "pointer", borderBottom: "1px solid #fafafa" }}
-                  onMouseEnter={e => (e.currentTarget.style.background = "#faf5ff")}
-                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                  <span style={{ opacity: 0.3, fontSize: 11 }}>→</span>{s}
-                </div>
-              ))
-          }
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Nav ──────────────────────────────────────────────────────────────────────
 
 const ALL_STUDENT_NAV_ITEMS = [
@@ -193,7 +155,6 @@ export default function UniversityPortal() {
 
   const [activeNav,    setActiveNav]    = useState("dashboard");
   const [collapsed,    setCollapsed]    = useState(false);
-  const [cmdOpen,      setCmdOpen]      = useState(false);
   const [profileOpen,  setProfileOpen]  = useState(false);
   const [coursesView,  setCoursesView]  = useState<"active" | "all">("active");
 
@@ -292,12 +253,6 @@ export default function UniversityPortal() {
   }, [upcomingExams, upcomingAssignments]);
 
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setCmdOpen(v => !v); } };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, []);
-
-  useEffect(() => {
     const h = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest("[data-profile-dd]")) setProfileOpen(false); };
     document.addEventListener("click", h);
     return () => document.removeEventListener("click", h);
@@ -331,7 +286,6 @@ export default function UniversityPortal() {
         .tr-exp:hover td{background:#faf5ff}
       `}</style>
 
-      {cmdOpen && <CommandPalette onClose={() => setCmdOpen(false)} />}
 
       <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'Sora',sans-serif" }}>
 
@@ -385,14 +339,19 @@ export default function UniversityPortal() {
             <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
               <span style={{ color: "#7c3aed" }}>Portal</span><span style={{ margin: "0 5px" }}>/</span><span style={{ color: "#1e1b4b", textTransform: "capitalize" }}>{activeNav}</span>
             </div>
-            <button onClick={() => setCmdOpen(true)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", border: "1.5px solid #ede9fe", borderRadius: 9, background: "#faf5ff", cursor: "pointer", color: "#94a3b8", fontSize: 12.5, fontFamily: "inherit", minWidth: 180 }}>
-              <span style={{ opacity: .5 }}>⌕</span><span style={{ flex: 1, textAlign: "left" }}>Search portal…</span>
-              <kbd style={{ fontSize: 9, padding: "2px 5px", background: "#ede9fe", border: "1px solid #ddd6fe", borderRadius: 4, color: "#7c3aed", fontFamily: "inherit" }}>⌘K</kbd>
-            </button>
+            {/* Search and notifications aren't built yet — shown disabled with a tooltip. */}
+            <ComingSoon>
+              <button disabled aria-disabled="true" style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", border: "1.5px solid #e2e8f0", borderRadius: 9, background: "#f8fafc", color: "#cbd5e1", fontSize: 12.5, fontFamily: "inherit", minWidth: 180 }}>
+                <span style={{ opacity: .6 }}>⌕</span><span style={{ flex: 1, textAlign: "left" }}>Search portal…</span>
+                <kbd style={{ fontSize: 9, padding: "2px 5px", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 4, color: "#cbd5e1", fontFamily: "inherit" }}>⌘K</kbd>
+              </button>
+            </ComingSoon>
             <div style={{ flex: 1 }} />
-            <button style={{ width: 34, height: 34, borderRadius: 9, border: "1.5px solid #ede9fe", background: "transparent", cursor: "pointer", fontSize: 14, position: "relative" }}>
-              🔔<span style={{ position: "absolute", top: 7, right: 7, width: 6, height: 6, borderRadius: "50%", background: "#7c3aed", border: "1.5px solid #fff" }} />
-            </button>
+            <ComingSoon>
+              <button disabled aria-disabled="true" aria-label="Notifications" style={{ width: 34, height: 34, borderRadius: 9, border: "1.5px solid #ede9fe", background: "transparent", fontSize: 14, position: "relative" }}>
+                🔔<span style={{ position: "absolute", top: 7, right: 7, width: 6, height: 6, borderRadius: "50%", background: "#7c3aed", border: "1.5px solid #fff" }} />
+              </button>
+            </ComingSoon>
             <div style={{ position: "relative" }} data-profile-dd>
               <button onClick={() => setProfileOpen(v => !v)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 9px", border: "1.5px solid #ede9fe", borderRadius: 9, background: "transparent", cursor: "pointer", fontFamily: "inherit" }}>
                 <div style={{ width: 26, height: 26, borderRadius: 6, background: "linear-gradient(135deg,#7c3aed,#a78bfa)", color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{userInitials}</div>
@@ -400,22 +359,33 @@ export default function UniversityPortal() {
                 <span style={{ fontSize: 9, color: "#94a3b8" }}>▾</span>
               </button>
               {profileOpen && (
-                <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 180, background: "#fff", border: "1px solid #ede9fe", borderRadius: 11, boxShadow: "0 16px 40px rgba(124,58,237,.12)", overflow: "hidden", zIndex: 20 }}>
+                <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 180, background: "#fff", border: "1px solid #ede9fe", borderRadius: 11, boxShadow: "0 16px 40px rgba(124,58,237,.12)", zIndex: 20 }}>
                   <div style={{ padding: "11px 13px", borderBottom: "1px solid #f3f0ff" }}>
                     <div style={{ fontSize: 12.5, fontWeight: 600, color: "#1e1b4b" }}>{studentName}</div>
                     <div style={{ fontSize: 10, color: "#a78bfa" }}>{disciplineName}</div>
                   </div>
                   {[
                     { label: "My Profile", action: () => setActiveNav("profile") },
-                    { label: "Settings",   action: () => {} },
+                    { label: "Settings",   comingSoon: true },
                     { label: "Sign Out",   action: logout },
-                  ].map((item, i) => (
-                    <div key={i} style={{ padding: "9px 13px", fontSize: 12.5, color: item.label === "Sign Out" ? "#ef4444" : "#374151", cursor: "pointer", borderBottom: i < 2 ? "1px solid #fafafa" : "none" }}
-                      onClick={() => { item.action(); setProfileOpen(false); }}
-                      onMouseEnter={e => (e.currentTarget.style.background = "#faf5ff")}
-                      onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                    >{item.label}</div>
-                  ))}
+                  ].map((item, i, items) => {
+                    const isLast = i === items.length - 1;
+                    const rowStyle = { padding: "9px 13px", fontSize: 12.5, borderBottom: isLast ? "none" : "1px solid #fafafa", borderRadius: isLast ? "0 0 11px 11px" : 0 };
+                    if (item.comingSoon) {
+                      return (
+                        <ComingSoon key={i} block placement="left">
+                          <div style={{ ...rowStyle, flex: 1, color: "#cbd5e1" }}>{item.label}</div>
+                        </ComingSoon>
+                      );
+                    }
+                    return (
+                      <div key={i} style={{ ...rowStyle, color: item.label === "Sign Out" ? "#ef4444" : "#374151", cursor: "pointer" }}
+                        onClick={() => { item.action?.(); setProfileOpen(false); }}
+                        onMouseEnter={e => (e.currentTarget.style.background = "#faf5ff")}
+                        onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                      >{item.label}</div>
+                    );
+                  })}
                 </div>
               )}
             </div>

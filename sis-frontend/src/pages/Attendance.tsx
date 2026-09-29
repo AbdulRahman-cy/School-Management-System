@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../api";
+import { fetchAllPages } from "../api";
 import { useAuth } from '../context/AuthContext'; 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,10 +26,9 @@ function useAttendance(studentId: number | null, termView: "active" | "past") {
   return useQuery<AttendanceRecord[]>({
     queryKey: ["attendance", { student: studentId, termView }],
     queryFn: async () => {
-      const { data } = await api.get<AttendanceRecord[]>("records/attendance/", {
-        params: { student: studentId, term_status: termView },
+      return fetchAllPages<AttendanceRecord>("/records/attendance/", {
+        student: studentId, term_status: termView,
       });
-      return data;
     },
     enabled: !!studentId, // Only fetch if we have a real student ID
     staleTime: 2 * 60 * 1000,

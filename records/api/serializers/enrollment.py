@@ -58,10 +58,14 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         ]
 
     def get_cohort_stats(self, obj):
-        # Only look at peer enrollments that have at least one grade
+        # Only look at peer enrollments that have at least one grade and a
+        # computed total. Enrollment.recalculate_grades() deliberately leaves
+        # final_percentage NULL until the enrollment is COMPLETED, so graded
+        # but still-active peers must be excluded or float(None) below 500s.
         peer_enrollments = Enrollment.objects.filter(
             course_class=obj.course_class,
-            grades__isnull=False
+            grades__isnull=False,
+            final_percentage__isnull=False,
         ).distinct()
 
         # Let the database do the heavy lifting for averages, max, min, and distribution

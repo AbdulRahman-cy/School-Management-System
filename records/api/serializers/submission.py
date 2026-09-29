@@ -32,4 +32,15 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
             "score", "submitted_at", "is_late",
             "created_at", "updated_at",
         ]
-        read_only_fields = ["submitted_at", "created_at", "updated_at"]
+        # student is set server-side from request.user; score is set by grading, never by the student.
+        read_only_fields = ["student", "score", "submitted_at", "created_at", "updated_at"]
+
+
+class StudentSubmissionGradeSerializer(serializers.ModelSerializer):
+    """Admin-only grading payload: score is the one writable field.
+    Range checks (0..assignment.max_points) are enforced by StudentSubmission.clean()."""
+
+    class Meta:
+        model  = StudentSubmission
+        fields = ["score"]
+        extra_kwargs = {"score": {"required": True, "allow_null": True}}

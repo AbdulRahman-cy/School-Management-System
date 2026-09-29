@@ -1,16 +1,20 @@
 from datetime import timedelta
 
 from django.conf import settings
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from users.models import BaseUser, StudentProfile, TeacherProfile
-from users.api.serializers import BaseUserSerializer, CustomTokenObtainPairSerializer, RegisterSerializer
+from users.api.serializers import BaseUserSerializer, CustomTokenObtainPairSerializer
+from users.api.throttling import LoginRateThrottle
 
 # ─────────────────────────────────────────────────────────────────────
 # Cookie configuration
@@ -60,12 +64,6 @@ def set_refresh_cookie(response, refresh_token):
     return response
 
 
-def set_auth_cookies(response, refresh):
-    set_access_cookie(response, refresh.access_token)
-    set_refresh_cookie(response, refresh)
-    return response
-
-
 def clear_auth_cookies(response):
     response.delete_cookie(ACCESS_COOKIE_NAME,  path='/')
     response.delete_cookie(REFRESH_COOKIE_NAME, path='/api/auth/')
@@ -73,36 +71,14 @@ def clear_auth_cookies(response):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 1. Registration
-# ─────────────────────────────────────────────────────────────────────
-
-class RegisterView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        user = serializer.save()
-        refresh = CustomTokenObtainPairSerializer.get_token(user)
-
-        response = Response(
-            {
-                'message': 'Registration successful.',
-                'user':    BaseUserSerializer(user).data,
-            },
-            status=status.HTTP_201_CREATED,
-        )
-        return set_auth_cookies(response, refresh)
-
-
-# ─────────────────────────────────────────────────────────────────────
-# 2. Login
+# 1. Login
 # ─────────────────────────────────────────────────────────────────────
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
+    # Setting throttle_classes replaces the global defaults, so keep the
+    # per-IP anon limit alongside the per-account login limit.
+    throttle_classes = [AnonRateThrottle, LoginRateThrottle]
 
     def post(self, request, *args, **kwargs):
         response = super().post(request, *args, **kwargs)
@@ -121,7 +97,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 3. Refresh
+# 2. Refresh
 # ─────────────────────────────────────────────────────────────────────
 
 class CustomTokenRefreshView(TokenRefreshView):
@@ -130,17 +106,22 @@ class CustomTokenRefreshView(TokenRefreshView):
         if not refresh_token:
             raise InvalidToken('No refresh token cookie found.')
 
-        # SimpleJWT expects request.data['refresh']
-        request.data['refresh'] = refresh_token
+        # SimpleJWT expects data['refresh']. Work on a copy: for form-encoded
+        # bodies request.data is an immutable QueryDict, so writing into it
+        # directly raised AttributeError (a 500) instead of refreshing.
+        data = request.data.copy() if isinstance(request.data, dict) else {}
+        data['refresh'] = refresh_token
 
-        response = super().post(request, *args, **kwargs)
-        if response.status_code != 200:
-            return response
+        serializer = self.get_serializer(data=data)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0]) from e
 
-        new_access  = response.data.get('access')
-        new_refresh = response.data.get('refresh')   # only if ROTATE_REFRESH_TOKENS
+        new_access  = serializer.validated_data.get('access')
+        new_refresh = serializer.validated_data.get('refresh')   # only if ROTATE_REFRESH_TOKENS
 
-        response.data = {'message': 'Token refreshed.'}
+        response = Response({'message': 'Token refreshed.'}, status=status.HTTP_200_OK)
 
         set_access_cookie(response, new_access)
         if new_refresh:
@@ -149,7 +130,7 @@ class CustomTokenRefreshView(TokenRefreshView):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 4. Logout
+# 3. Logout
 # ─────────────────────────────────────────────────────────────────────
 
 class LogoutView(APIView):
@@ -171,14 +152,19 @@ class LogoutView(APIView):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 5. Me — current user info
+# 4. Me — current user info
 # ─────────────────────────────────────────────────────────────────────
 
+@method_decorator(ensure_csrf_cookie, name='dispatch')
 class MeView(APIView):
     """
     Returns the currently authenticated user.
     Frontend calls this on mount to ask "am I logged in, and as whom?"
     Since the JWT lives in an HttpOnly cookie, JS cannot decode it itself.
+
+    Also sets the (JS-readable) `csrftoken` cookie. The frontend calls this on
+    mount and right after login, and axios echoes the cookie back as
+    X-CSRFToken on every unsafe request — which JWTCookieAuthentication requires.
     """
     permission_classes = [IsAuthenticated]
 

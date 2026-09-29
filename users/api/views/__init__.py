@@ -1,5 +1,4 @@
 from .auth import (
-    RegisterView,
     CustomTokenObtainPairView,
     CustomTokenRefreshView,
     LogoutView,
@@ -10,7 +9,6 @@ from .teacher_profile import TeacherProfileViewSet
 from .student_profile import StudentProfileViewSet
 
 __all__ = [
-    "RegisterView",
     "CustomTokenObtainPairView",
     "CustomTokenRefreshView",
     "LogoutView",

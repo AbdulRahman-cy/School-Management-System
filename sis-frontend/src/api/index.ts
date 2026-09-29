@@ -149,6 +149,33 @@ export const queryKeys = {
   teacherSessions:  ()                                => ["teacher-sessions"] as const,
 };
  
+// ─── Pagination ───────────────────────────────────────────────────────────────
+// Every DRF list endpoint is paginated ({count, next, previous, results}).
+// The screens below need the complete (already user-scoped) set, so walk the
+// pages by number. We don't follow `next` directly: DRF builds it as an
+// absolute URL from the request's scheme/host, which behind nginx can come
+// back as http:// on an https page.
+
+interface Paginated<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+const MAX_PAGE_SIZE = 500; // mirrors core.pagination.StandardPagination.max_page_size
+
+export async function fetchAllPages<T>(url: string, params?: Record<string, unknown>): Promise<T[]> {
+  const items: T[] = [];
+  for (let page = 1; ; page++) {
+    const { data } = await apiClient.get<Paginated<T>>(url, {
+      params: { ...params, page, page_size: MAX_PAGE_SIZE },
+    });
+    items.push(...data.results);
+    if (!data.next) return items;
+  }
+}
+
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
  
 async function fetchStudentProfile(id: number): Promise<StudentProfile> {
@@ -160,10 +187,9 @@ async function fetchEnrollments(
   studentId: number,
   termStatus: "active" | "past" | "all" = "active",
 ): Promise<Enrollment[]> {
-  const { data } = await apiClient.get<Enrollment[]>("/records/enrollments/", {
-    params: { student: studentId, term_status: termStatus },
+  return fetchAllPages<Enrollment>("/records/enrollments/", {
+    student: studentId, term_status: termStatus,
   });
-  return data;
 }
 
 async function fetchEnrollmentSummary(
@@ -181,36 +207,23 @@ async function fetchEnrollmentSummary(
 // one fetcher serves both the student's Timetable tab and the teacher/admin
 // Timetable tab; no id needs to be (or can be) passed.
 async function fetchMySessions(): Promise<Session[]> {
-  const { data } = await apiClient.get<Session[]>("/scheduling/schedule-sessions/");
-  return data;
+  return fetchAllPages<Session>("/scheduling/schedule-sessions/");
 }
  
 async function fetchExamResults(studentId: number): Promise<ExamResult[]> {
-  const { data } = await apiClient.get<ExamResult[]>("/records/exam-results/", {
-    params: { student: studentId },
-  });
-  return data;
+  return fetchAllPages<ExamResult>("/records/exam-results/", { student: studentId });
 }
  
 async function fetchStudentSubmissions(studentId: number): Promise<StudentSubmission[]> {
-  const { data } = await apiClient.get<StudentSubmission[]>("/records/student-submissions/", {
-    params: { student: studentId },
-  });
-  return data;
+  return fetchAllPages<StudentSubmission>("/records/student-submissions/", { student: studentId });
 }
  
 async function fetchUpcomingExams(studentId: number): Promise<Exam[]> {
-  const { data } = await apiClient.get<Exam[]>("/records/exams/", {
-    params: { student: studentId, term_status: "active" },
-  });
-  return data;
+  return fetchAllPages<Exam>("/records/exams/", { student: studentId, term_status: "active" });
 }
  
 async function fetchUpcomingAssignments(studentId: number): Promise<Assignment[]> {
-  const { data } = await apiClient.get<Assignment[]>("/records/assignments/", {
-    params: { student: studentId, term_status: "active" },
-  });
-  return data;
+  return fetchAllPages<Assignment>("/records/assignments/", { student: studentId, term_status: "active" });
 }
  
 // ─── Hooks ────────────────────────────────────────────────────────────────────
@@ -336,25 +349,21 @@ export function useUpcomingAssignments(studentId: number | null) {
 // ─── Reference data fetchers ─────────────────────────────────────────────────
 
 async function fetchDisciplines(): Promise<DisciplineOption[]> {
-  const { data } = await apiClient.get<DisciplineOption[]>("/academics/disciplines/");
-  return data;
+  return fetchAllPages<DisciplineOption>("/academics/disciplines/");
 }
 
 async function fetchTerms(): Promise<TermOption[]> {
-  const { data } = await apiClient.get<TermOption[]>("/academics/terms/");
-  return data;
+  return fetchAllPages<TermOption>("/academics/terms/");
 }
 
 async function fetchCourses(): Promise<CourseOption[]> {
-  const { data } = await apiClient.get<CourseOption[]>("/academics/courses/");
-  return data;
+  return fetchAllPages<CourseOption>("/academics/courses/");
 }
 
 async function fetchTeachers(departmentId?: number): Promise<TeacherOption[]> {
-  const { data } = await apiClient.get<TeacherOption[]>("/users/teachers/", {
-    params: departmentId ? { department_id: departmentId } : undefined,
-  });
-  return data;
+  return fetchAllPages<TeacherOption>("/users/teachers/",
+    departmentId ? { department_id: departmentId } : undefined,
+  );
 }
 
 async function fetchAdminDashboard(): Promise<AdminDashboardData> {
@@ -379,19 +388,13 @@ async function fetchCohorts(status: string = "active", disciplineId?: number | n
 }
 
 async function fetchBlueprintCourses(disciplineId: number, yearLevel: number, termId: number): Promise<CourseOption[]> {
-  const { data } = await apiClient.get<CourseOption[] | { results: CourseOption[] }>("/academics/courses/", {
-    params: {
-      discipline_id: disciplineId,
-      discipline: disciplineId,
-      year_level: yearLevel,
-      term_id: termId,
-      term: termId,
-    },
+  return fetchAllPages<CourseOption>("/academics/courses/", {
+    discipline_id: disciplineId,
+    discipline: disciplineId,
+    year_level: yearLevel,
+    term_id: termId,
+    term: termId,
   });
-  if (data && typeof data === "object" && "results" in data && Array.isArray((data as { results: CourseOption[] }).results)) {
-    return (data as { results: CourseOption[] }).results;
-  }
-  return Array.isArray(data) ? data : [];
 }
 
 async function createCohort(payload: CohortBulkCreatePayload): Promise<unknown> {
@@ -890,4 +893,4 @@ export function useAdminUnenroll() {
     onSuccess: () => invalidateAdminEnrollmentCaches(queryClient),
   });
 }
-
+
