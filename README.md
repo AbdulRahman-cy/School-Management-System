@@ -1,6 +1,5 @@
 
 
-https://github.com/user-attachments/assets/ff76001a-bb46-49aa-8835-c0ad63ce9137
 
 <div align="center">
 
@@ -12,7 +11,7 @@ Built on Django REST Framework and React + TypeScript, containerized with Docker
 <br>
 
 <!-- Demo video: on GitHub, drag the .mp4 into this README in the web editor to get an embeddable link, then replace the line below. -->
-**[Insert 54s Motion Graphics Demo Video Here]**
+https://github.com/user-attachments/assets/ff76001a-bb46-49aa-8835-c0ad63ce9137
 
 </div>
 
