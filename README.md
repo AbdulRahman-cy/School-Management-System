@@ -238,7 +238,8 @@ The later CloudWatch production-monitoring dashboard shows the following **ALB `
 | Average | **79.2 ms** |
 | Minimum | **34.6 ms** |
 
-![CloudWatch enrollment-monitoring dashboard with response-time percentiles, HTTP status counts, CPU usage, and database connections](docs/images/cloudwatch-final-enrollment.png)
+![CloudWatch enrollment-monitoring dashboard with response-time percentiles, HTTP status counts, CPU usage, and database connections](<img width="1882" height="762" alt="Screenshot 2026-09-22 031248" src="https://github.com/user-attachments/assets/7e71f40d-165b-4d45-a53a-1cb3f56790f3" />
+)
 
 *Evidence and interpretation:* This screenshot was captured later in the optimization sequence, including after the response-payload simplification described above. The dashboard alone does **not** establish that the serializer caused the change in p99 or average: workload, deployment configuration, and the selected period may have differed. The history also includes an isolated spike near **13.5 seconds**, so **429.6 ms is the displayed p99, not a maximum or a guarantee for every request**. A strictly comparable before/after test would rerun the same 500-user workload and use identical ALB aggregations over matched windows. The dashboard's 4xx count should also be classified (e.g., expected enrollment conflicts versus unexpected failures) before drawing conclusions about reliability.
 
