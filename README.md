@@ -23,6 +23,7 @@ https://github.com/user-attachments/assets/ff76001a-bb46-49aa-8835-c0ad63ce9137
 | **Database Schema** (21 tables, every constraint and index) | [docs/](docs/): interactive diagram, PNG, and DBML source |
 | **OpenAPI 3 Schema** | [openapi.json](openapi.json) · interactive Swagger UI at `http://localhost/api/docs/` when running locally |
 | **Production Architecture Diagram** | [sis-production-architecture-v3.drawio.png](sis-production-architecture-v3.drawio.png) |
+| **Load-Test Engineering Case Study** | [Enrollment under load](#1-enrollment-under-load) · [CloudWatch evidence](#follow-up-cloudwatch-evidence) |
 
 **Contents:** [Tech Stack](#tech-stack) · [Architecture](#architecture) · [Engineering Highlights](#engineering-highlights) · [Known Limitations](#known-limitations) · [Local Development Setup](#local-development-setup)
 
@@ -163,7 +164,9 @@ Timetables are generated per cohort by `CohortSchedulerService` using Google OR-
 
 ### 1. Enrollment under load
 
-A 500-student enrollment burst made the enroll endpoint look broken: my load tester reported a p99 of 37 seconds. I traced it layer by layer using server-side measurements and found three real bottlenecks stacked on top of each other: a lock convoy in the enrollment transaction, a CPU-bound database, and too few request slots on the app tier. The load tester was also inflating its own numbers. After fixing each layer, the worst-case server response time dropped from over 13 s to **2.6 s**, averaging about **0.6 s**.
+A 500-student enrollment burst made the enroll endpoint look broken: Locust initially reported a p99 of 37 seconds. I investigated it from application code through PostgreSQL and the AWS application tier, finding a lock convoy, database CPU saturation, and an app-tier request queue. I also discovered that my single-process load generator inflated its own reported latencies. After database and infrastructure fixes, **ALB `TargetResponseTime` peaked at 2.6 s (Maximum), averaging roughly 0.6 s** in that load-test stage. Earlier server-side measurements had shown requests above 13 s.
+
+I subsequently simplified the enrollment response serializer to eliminate nested data the caller did not need. A **later CloudWatch dashboard snapshot** displays **429.6 ms p99** and **79.2 ms average** target response time. These values come from a *separate dashboard window*, not a new maximum for the original 500-user run or a controlled experiment isolating the serializer. See [Follow-up CloudWatch evidence](#follow-up-cloudwatch-evidence).
 
 My rule throughout: no fix without a measurement that proves the cause, and no "fixed" without a measurement after.
 
@@ -178,6 +181,15 @@ My rule throughout: no fix without a measurement that proves the cause, and no "
 | **Server-side clocks** | ALB `TargetResponseTime`, Gunicorn access log (`%(D)s`), phase timers inside `EnrollmentService`, `pg_stat_activity`, RDS CloudWatch metrics |
 
 #### Results
+
+These measurements come from different stages and should not be interpreted as one continuous benchmark:
+
+| Stage | Evidence | Result |
+| --- | --- | --- |
+| Early bottleneck investigation | Gunicorn and ALB timings under load | Gunicorn logged requests up to 15.8 s; earlier ALB intervals showed readings above 13 s |
+| After database and app-tier changes | ALB `TargetResponseTime` in the 500-user test stage | **2.6 s Maximum**, ~0.6 s Average |
+| After serializer slimming | Payload size and one client-observed request | **8.81 KB → 1.04 KB**; **459 ms → 220 ms** for a single request including network |
+| Later monitoring snapshot | CloudWatch `TargetResponseTime` in a different selected time window | **429.6 ms p99**, **79.2 ms Average**, **34.6 ms Minimum**; not directly comparable with earlier test maxima |
 
 | # | Bottleneck | How I proved it | Fix | After |
 | --- | --- | --- | --- | --- |
@@ -216,20 +228,35 @@ Lock waits dropped from most of the long-running queries to 12–13 of the ~65�
 
 **Round 5: the response did too much.** The enroll endpoint returned the full `EnrollmentSerializer`: nested class, study group, discipline and department objects, plus grades and cohort statistics, none of which a client needs right after enrolling. A slim `EnrollResultSerializer` returns IDs and the course code, and adds no queries because the service builds each `Enrollment` from `CourseClass` objects already loaded with `select_related("course", "group")`. The response shrank from 8.81 KB to 1.04 KB, and a single enroll request from my machine in Egypt to the Frankfurt region went from 459 ms to 220 ms, network included.
 
+#### Follow-up CloudWatch evidence
+
+The later CloudWatch production-monitoring dashboard shows the following **ALB `TargetResponseTime`** readings within its selected 3-hour window:
+
+| Dashboard statistic | Value |
+| --- | ---: |
+| p99 | **429.6 ms** |
+| Average | **79.2 ms** |
+| Minimum | **34.6 ms** |
+
+![CloudWatch enrollment-monitoring dashboard with response-time percentiles, HTTP status counts, CPU usage, and database connections](docs/images/cloudwatch-final-enrollment.png)
+
+*Evidence and interpretation:* This screenshot was captured later in the optimization sequence, including after the response-payload simplification described above. The dashboard alone does **not** establish that the serializer caused the change in p99 or average: workload, deployment configuration, and the selected period may have differed. The history also includes an isolated spike near **13.5 seconds**, so **429.6 ms is the displayed p99, not a maximum or a guarantee for every request**. A strictly comparable before/after test would rerun the same 500-user workload and use identical ALB aggregations over matched windows. The dashboard's 4xx count should also be classified (e.g., expected enrollment conflicts versus unexpected failures) before drawing conclusions about reliability.
+
 **Also tuned:** PgBouncer runs in transaction mode with 40 pre-warmed server connections (`min_pool_size` 0 → 40), so a burst doesn't wait for new TLS connections and Postgres backends to open on RDS. A partial index on `Enrollment(student) WHERE status = 'ENROLLED'` backs the per-student checks, mirroring the existing per-class index.
 
 #### The load tester was inflating its own numbers
 
 Locust reported latencies the server never saw. In one run it showed a 62.5 s max while the ALB's peak for the same window was ~13 s. After every fix above, it still reported a p99 of ~48 s while the ALB measured a 2.6 s max. Locust was running all 500 users as greenlets in a single Python process on my laptop; once that one core saturated, its own scheduling delay was counted as response time. Locust's docs recommend one process per CPU core for exactly this reason.
 
-So every number in this section is server-side. Locust generates the load; the ALB, Gunicorn and Postgres report what happened.
+For the 500-user load-test stages, I relied on server-side timings from ALB, Gunicorn, and PostgreSQL rather than Locust's overloaded client-side percentiles. The **459 → 220 ms** serializer comparison is specifically a *single client-observed request*, while the later CloudWatch summary refers to a different selected window.
 
 #### Lessons
 
 - **Measure at the server.** A load generator is software on finite hardware, and it can become the bottleneck it's supposed to measure.
 - **A lock's cost is its hold time multiplied by the queue behind it.** Shrinking the hold helps. Not holding it across round trips helps more.
 - **CPU percentage measures work, not waiting.** 20% CPU with a full request queue is still a full queue.
-- **Every fix exposes the next bottleneck.** Lock → database CPU → app-tier slots. Re-measure after each change.
+- **Every fix exposes the next bottleneck.** Lock → database CPU → app-tier slots → response payload. Re-measure after each change.
+- **Compare like with like.** A later p99 should not be presented as the maximum of an earlier run; use matching workloads, periods, and statistics.
 
 #### What I'd do next
 
@@ -237,9 +264,9 @@ So every number in this section is server-side. Locust generates the load; the A
 - Take row locks in a fixed order (`ORDER BY id`) in multi-class enrollments, so two overlapping study-group enrollments can't deadlock.
 - Protect the denormalized counter: add `CHECK (seats_taken <= capacity)`, a scheduled drift check, and route the generic `EnrollmentViewSet` writes through `EnrollmentService`.
 - Take a per-student advisory lock so two tabs from the same student can't both pass the unlocked checks.
-- Bring the worst case under 1 s, the usual p99 target for user-facing APIs.
+- Re-run the same distributed 500-user workload after the serializer work, measure ALB Maximum/p99/Average over a comparable window, and investigate the isolated high-latency spike in the follow-up screenshot.
 
-<sub>The ~13 s ALB reading was taken with CloudWatch's default Average statistic at 1-second resolution, which understates the true peak (Gunicorn logged requests up to 15.8 s at that stage). The 2.6 s figure uses the Maximum statistic.</sub>
+<sub>Measurement caveat: the earlier ALB >13 s reading used CloudWatch's Average aggregation over a short interval, while Gunicorn independently logged requests up to 15.8 s. The **2.6 s** figure is a later ALB Maximum. The **429.6 ms p99 / 79.2 ms Average** readings belong to a separate monitoring window and do not replace that 2.6 s maximum.</sub>
 
 ### 2. Closing a Broken Object Level Authorization (BOLA) hole
 
